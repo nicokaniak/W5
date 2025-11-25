@@ -1,7 +1,20 @@
 #include "BatteryManager.h"
 #include "pins_config.h"
 
-void BatteryManager::initBattery() { pinMode(PIN_BAT_VOLT, INPUT); }
+void BatteryManager::initBattery() {
+  // Enable power for battery operation (required for LilyGO T-Display AMOLED)
+  // BOTH pins are required for battery operation:
+
+  // GPIO15 enables the power circuit for display and battery
+  pinMode(PIN_POWER_ON, OUTPUT);
+  digitalWrite(PIN_POWER_ON, HIGH);
+
+  // GPIO38 enables the backlight
+  pinMode(PIN_LED, OUTPUT);
+  digitalWrite(PIN_LED, HIGH);
+
+  pinMode(PIN_BAT_VOLT, INPUT);
+}
 
 float BatteryManager::getVoltage() {
   // Read ADC value (0-4095)
