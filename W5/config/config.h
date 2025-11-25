@@ -9,7 +9,7 @@ struct WifiCreds {
 // Add your networks here. The code will try them in order.
 static const WifiCreds WIFI_NETWORKS[] = {{"TN-CV8441", "6ShrynreacBo"},
                                           {"MashWIFI_6Ghz", "SPV01Udupi"},
-                                          {"AnotherSSID", "AnotherPassword"}};
+                                          {"MASHWIFI", "SPV01Udupi"}};
 
 static const int WIFI_NETWORK_COUNT =
     sizeof(WIFI_NETWORKS) / sizeof(WIFI_NETWORKS[0]);

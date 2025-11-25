@@ -3,10 +3,13 @@
 #include <HTTPClient.h>
 #include <WiFi.h>
 
-
 static String weatherInfo = "No data";
 
 void WeatherManager::initWeather() {
+  WiFi.mode(WIFI_STA);
+  WiFi.disconnect(true);
+  delay(1000);
+
   for (int i = 0; i < WIFI_NETWORK_COUNT; i++) {
     Serial.print("Connecting to ");
     Serial.println(WIFI_NETWORKS[i].ssid);
@@ -25,7 +28,10 @@ void WeatherManager::initWeather() {
       Serial.println("Connected to WiFi");
       return;
     } else {
-      Serial.println("Failed to connect.");
+      Serial.print("Failed to connect. Status: ");
+      Serial.println(WiFi.status());
+      WiFi.disconnect(true);
+      delay(2000);
     }
   }
   Serial.println("Could not connect to any WiFi network.");

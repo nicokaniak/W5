@@ -1,10 +1,11 @@
-#include <Arduino.h>
-#include "config/config.h"
-#include "TimeManager.h"
 #include "AlarmManager.h"
 #include "BluetoothManager.h"
-#include "WeatherManager.h"
 #include "DisplayManager.h"
+#include "TimeManager.h"
+#include "WeatherManager.h"
+#include "config/config.h"
+#include <Arduino.h>
+
 
 void setup() {
   Serial.begin(115200);
@@ -14,10 +15,12 @@ void setup() {
   DisplayManager::initDisplay();
   Serial.println("Display initialized");
 
+  // Initialize WiFi first so NTP can sync
+  WeatherManager::initWeather();
+
   TimeManager::initTime();
   AlarmManager::initAlarms();
   BluetoothManager::initBluetooth();
-  WeatherManager::initWeather();
 }
 
 void loop() {
