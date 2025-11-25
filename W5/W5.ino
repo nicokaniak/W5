@@ -8,7 +8,11 @@
 
 void setup() {
   Serial.begin(115200);
+  delay(1000); // Wait for serial to initialize
+  Serial.println("=== W5 Starting ===");
+  Serial.println("Initializing display...");
   DisplayManager::initDisplay();
+  Serial.println("Display initialized");
 
   TimeManager::initTime();
   AlarmManager::initAlarms();

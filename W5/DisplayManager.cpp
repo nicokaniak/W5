@@ -1,31 +1,35 @@
 #include "DisplayManager.h"
-#include <TFT_eSPI.h> // Library for Lilygo T-Display AMOLED
+#include "RM67162Display.h"
 
-static TFT_eSPI tft = TFT_eSPI();
+static RM67162Display display;
 
 void DisplayManager::initDisplay() {
-  tft.init();
-  tft.setRotation(1);
-  tft.fillScreen(TFT_BLACK);
+  display.begin();
+  display.setRotation(1);
+  display.fillScreen(0x0000); // black
 }
 
 void DisplayManager::clearDisplay() {
-  tft.fillScreen(TFT_BLACK);
+  display.fillScreen(0x0000);
 }
 
 void DisplayManager::drawText(const String &text, int x, int y) {
-  tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.setTextSize(3);
-  tft.drawString(text, x, y);
+  display.setTextColor(0xFFFF, 0x0000); // white on black
+  display.setTextSize(3);
+  display.setCursor(x, y);
+  display.print(text);
 }
 
 void DisplayManager::drawWatchFace(const String &timeStr) {
-  tft.fillScreen(TFT_BLACK);
-  tft.setTextColor(TFT_CYAN, TFT_BLACK);
-  tft.setTextSize(4);
+  display.fillScreen(0x0000);
+  display.setTextColor(0x07FF, 0x0000); // cyan
+  display.setTextSize(4);
 
-  auto previousDatum = tft.getTextDatum();
-  tft.setTextDatum(MC_DATUM);
-  tft.drawString(timeStr, tft.width() / 2, tft.height() / 2);
-  tft.setTextDatum(previousDatum);
+  int16_t x1, y1;
+  uint16_t w, h;
+  display.getTextBounds(timeStr, 0, 0, &x1, &y1, &w, &h);
+  int16_t x = (display.width() - w) / 2 - x1;
+  int16_t y = (display.height() - h) / 2 - y1;
+  display.setCursor(x, y);
+  display.print(timeStr);
 }
