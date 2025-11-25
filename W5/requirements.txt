@@ -1,0 +1,4 @@
+# Arduino library dependencies for the W5 project
+WiFi
+HTTPClient
+Adafruit_GFX

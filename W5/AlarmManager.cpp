@@ -20,19 +20,19 @@ void AlarmManager::setAlarm(uint8_t hour, uint8_t minute) {
 }
 
 void AlarmManager::checkAlarms() {
-  if (!alarmSet) return;
+  if (!alarmSet)
+    return;
 
   String currentTime = TimeManager::getCurrentTime();
   int currentHour = currentTime.substring(0, 2).toInt();
   int currentMinute = currentTime.substring(3, 5).toInt();
 
-  if (currentHour == alarmHour && currentMinute == alarmMinute && !alarmActive) {
+  if (currentHour == alarmHour && currentMinute == alarmMinute &&
+      !alarmActive) {
     alarmActive = true;
     // Trigger alarm action here (buzz, display, etc.)
     Serial.println("Alarm Triggered!");
   }
 }
 
-bool AlarmManager::isAlarmActive() {
-  return alarmActive;
-}
+bool AlarmManager::isAlarmActive() { return alarmActive; }

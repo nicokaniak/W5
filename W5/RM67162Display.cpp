@@ -7,24 +7,24 @@ RM67162Display::RM67162Display()
 
 void RM67162Display::begin() {
   Serial.println("RM67162Display::begin() starting...");
-  
+
   // Power enable pin (GPIO 38) - critical for AMOLED
   pinMode(PIN_LED, OUTPUT);
-  digitalWrite(PIN_LED, HIGH);
-  
+  digitalWrite(PIN_LED, LOW);
+
   delay(100);
-  
+
   rm67162_init();
   lcd_brightness(0xFF);
-  
+
   // Landscape mode
   lcd_setRotation(1);
-  _width = TFT_HEIGHT;  // 536
-  _height = TFT_WIDTH;  // 240
-  
+  _width = TFT_HEIGHT; // 536
+  _height = TFT_WIDTH; // 240
+
   // Clear to black
   lcd_fill(0, 0, _width, _height, 0x0000);
-  
+
   Serial.println("RM67162Display::begin() complete");
 }
 
