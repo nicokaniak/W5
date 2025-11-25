@@ -10,7 +10,7 @@ void RM67162Display::begin() {
 
   // Power enable pin (GPIO 38) - critical for AMOLED
   pinMode(PIN_LED, OUTPUT);
-  digitalWrite(PIN_LED, LOW);
+  digitalWrite(PIN_LED, HIGH);
 
   delay(100);
 
