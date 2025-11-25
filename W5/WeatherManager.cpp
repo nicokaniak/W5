@@ -1,30 +1,42 @@
 #include "WeatherManager.h"
-#include <WiFi.h>
-#include <HTTPClient.h>
 #include "config/config.h"
+#include <HTTPClient.h>
+#include <WiFi.h>
+
 
 static String weatherInfo = "No data";
 
 void WeatherManager::initWeather() {
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  Serial.print("Connecting to WiFi");
-  int retryCount = 0;
-  while (WiFi.status() != WL_CONNECTED && retryCount < 20) {
-    delay(500);
-    Serial.print(".");
-    retryCount++;
+  for (int i = 0; i < WIFI_NETWORK_COUNT; i++) {
+    Serial.print("Connecting to ");
+    Serial.println(WIFI_NETWORKS[i].ssid);
+
+    WiFi.begin(WIFI_NETWORKS[i].ssid, WIFI_NETWORKS[i].password);
+
+    int retryCount = 0;
+    while (WiFi.status() != WL_CONNECTED && retryCount < 20) {
+      delay(500);
+      Serial.print(".");
+      retryCount++;
+    }
+    Serial.println();
+
+    if (WiFi.status() == WL_CONNECTED) {
+      Serial.println("Connected to WiFi");
+      return;
+    } else {
+      Serial.println("Failed to connect.");
+    }
   }
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("Connected to WiFi");
-  } else {
-    Serial.println("WiFi connection failed");
-  }
+  Serial.println("Could not connect to any WiFi network.");
 }
 
 void WeatherManager::updateWeather() {
   if (WiFi.status() == WL_CONNECTED) {
     HTTPClient http;
-    String apiUrl = "https://api.open-meteo.com/v1/forecast?latitude=" + String(LATITUDE) + "&longitude=" + String(LONGITUDE) + "&current_weather=true";
+    String apiUrl =
+        "https://api.open-meteo.com/v1/forecast?latitude=" + String(LATITUDE) +
+        "&longitude=" + String(LONGITUDE) + "&current_weather=true";
     http.begin(apiUrl);
     int httpCode = http.GET();
     if (httpCode == 200) {
@@ -46,6 +58,4 @@ void WeatherManager::updateWeather() {
   }
 }
 
-String WeatherManager::getWeatherInfo() {
-  return weatherInfo;
-}
+String WeatherManager::getWeatherInfo() { return weatherInfo; }
