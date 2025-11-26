@@ -1,7 +1,9 @@
 #ifndef DISPLAYMANAGER_H
 #define DISPLAYMANAGER_H
 
+#include <Adafruit_GFX.h>
 #include <Arduino.h>
+
 
 class DisplayManager {
 public:
@@ -13,6 +15,10 @@ public:
   static void drawAlarmsScreen();
   static void drawBatteryScreen();
   static void drawBluetoothScreen();
+
+private:
+  static GFXcanvas16 *canvas;
+  static void pushToDisplay();
 };
 
 #endif

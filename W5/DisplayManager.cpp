@@ -2,56 +2,93 @@
 #include "BatteryManager.h"
 #include "RM67162Display.h"
 #include "WeatherManager.h"
+#include "rm67162.h" // For lcd_PushColors
+
 
 static RM67162Display display;
+GFXcanvas16 *DisplayManager::canvas = nullptr;
 
 void DisplayManager::initDisplay() {
   display.begin();
-  display.setRotation(1);
-  display.fillScreen(0x0000); // black
+  display.setRotation(1);     // Landscape
+  display.fillScreen(0x0000); // Clear initial screen
+
+  // Allocate framebuffer in PSRAM if possible, otherwise heap
+  // 536 * 240 * 2 = 257,280 bytes
+  canvas = new GFXcanvas16(display.width(), display.height());
+  if (canvas) {
+    Serial.println("Canvas allocated successfully");
+  } else {
+    Serial.println("Canvas allocation FAILED!");
+  }
 }
 
-void DisplayManager::clearDisplay() { display.fillScreen(0x0000); }
+void DisplayManager::pushToDisplay() {
+  if (canvas) {
+    lcd_PushColors(0, 0, canvas->width(), canvas->height(),
+                   canvas->getBuffer());
+  }
+}
+
+void DisplayManager::clearDisplay() {
+  if (canvas)
+    canvas->fillScreen(0x0000);
+  pushToDisplay();
+}
 
 void DisplayManager::drawText(const String &text, int x, int y) {
-  display.setTextColor(0xFFFF, 0x0000); // white on black
-  display.setTextSize(3);
-  display.setCursor(x, y);
-  display.print(text);
+  if (!canvas)
+    return;
+  canvas->fillScreen(0x0000);
+  canvas->setTextColor(0xFFFF, 0x0000); // white on black
+  canvas->setTextSize(3);
+  canvas->setCursor(x, y);
+  canvas->print(text);
+  pushToDisplay();
 }
 
 void DisplayManager::drawWatchFace(const String &timeStr) {
-  display.fillScreen(0x0000);
-  display.setTextColor(0x07FF, 0x0000); // cyan
-  display.setTextSize(4);
+  if (!canvas)
+    return;
+
+  // Draw to off-screen buffer
+  canvas->fillScreen(0x0000);
+  canvas->setTextColor(0x07FF, 0x0000); // cyan
+  canvas->setTextSize(4);
 
   int16_t x1, y1;
   uint16_t w, h;
-  display.getTextBounds(timeStr, 0, 0, &x1, &y1, &w, &h);
-  int16_t x = (display.width() - w) / 2 - x1;
-  int16_t y = (display.height() - h) / 2 - y1;
-  display.setCursor(x, y);
-  display.print(timeStr);
+  canvas->getTextBounds(timeStr, 0, 0, &x1, &y1, &w, &h);
+  int16_t x = (canvas->width() - w) / 2 - x1;
+  int16_t y = (canvas->height() - h) / 2 - y1;
+  canvas->setCursor(x, y);
+  canvas->print(timeStr);
 
   // ----- Battery bar (bottom‑right) -----
   int batPct = BatteryManager::getPercentage();
   int barWidth = map(batPct, 0, 100, 0, 50); // max 50 px width
-  int barX = display.width() - 55;           // 5 px margin from right edge
-  int barY = display.height() - 10;          // 10 px from bottom
+  int barX = canvas->width() - 55;           // 5 px margin from right edge
+  int barY = canvas->height() - 10;          // 10 px from bottom
   // background (light gray)
-  display.fillRect(barX, barY, 50, 8, 0x7BEF);
+  canvas->fillRect(barX, barY, 50, 8, 0x7BEF);
   // fill proportional to charge (green)
-  display.fillRect(barX, barY, barWidth, 8, 0x07E0);
+  canvas->fillRect(barX, barY, barWidth, 8, 0x07E0);
+
+  // Push buffer to display
+  pushToDisplay();
 }
 
 void DisplayManager::drawWeatherScreen() {
-  display.fillScreen(0x0000);
+  if (!canvas)
+    return;
+
+  canvas->fillScreen(0x0000);
 
   // Title
-  display.setTextColor(0xFFE0, 0x0000); // yellow
-  display.setTextSize(3);
-  display.setCursor(10, 10);
-  display.print("WEATHER");
+  canvas->setTextColor(0xFFE0, 0x0000); // yellow
+  canvas->setTextSize(3);
+  canvas->setCursor(10, 10);
+  canvas->print("WEATHER");
 
   // Get weather data
   String temp = WeatherManager::getTemperature();
@@ -59,89 +96,99 @@ void DisplayManager::drawWeatherScreen() {
   String wind = WeatherManager::getWindSpeed();
 
   // Temperature
-  display.setTextColor(0xFFFF, 0x0000); // white
-  display.setTextSize(2);
-  display.setCursor(10, 50);
-  display.print("Temp: ");
-  display.print(temp);
-  display.print(" C");
+  canvas->setTextColor(0xFFFF, 0x0000); // white
+  canvas->setTextSize(2);
+  canvas->setCursor(10, 50);
+  canvas->print("Temp: ");
+  canvas->print(temp);
+  canvas->print(" C");
 
   // Conditions
-  display.setCursor(10, 80);
-  display.print("Conditions:");
-  display.setCursor(10, 105);
-  display.setTextSize(2);
-  display.print(conditions);
+  canvas->setCursor(10, 80);
+  canvas->print("Conditions:");
+  canvas->setCursor(10, 105);
+  canvas->setTextSize(2);
+  canvas->print(conditions);
 
   // Wind speed
-  display.setCursor(10, 135);
-  display.print("Wind: ");
-  display.print(wind);
-  display.print(" km/h");
+  canvas->setCursor(10, 135);
+  canvas->print("Wind: ");
+  canvas->print(wind);
+  canvas->print(" km/h");
 
   // Location note
-  display.setTextColor(0x7BEF, 0x0000); // gray
-  display.setTextSize(1);
-  display.setCursor(10, 170);
-  display.print("Location: Copenhagen");
+  canvas->setTextColor(0x7BEF, 0x0000); // gray
+  canvas->setTextSize(1);
+  canvas->setCursor(10, 170);
+  canvas->print("Location: Copenhagen");
 
   // Update hint
-  display.setCursor(10, 185);
-  display.print("Updates every 60s");
+  canvas->setCursor(10, 185);
+  canvas->print("Updates every 60s");
+
+  pushToDisplay();
 }
 
 void DisplayManager::drawAlarmsScreen() {
-  display.fillScreen(0x0000);
+  if (!canvas)
+    return;
+
+  canvas->fillScreen(0x0000);
 
   // Title
-  display.setTextColor(0xF81F, 0x0000); // magenta
-  display.setTextSize(3);
-  display.setCursor(10, 10);
-  display.print("ALARMS");
+  canvas->setTextColor(0xF81F, 0x0000); // magenta
+  canvas->setTextSize(3);
+  canvas->setCursor(10, 10);
+  canvas->print("ALARMS");
 
   // Alarm info
-  display.setTextColor(0xFFFF, 0x0000); // white
-  display.setTextSize(2);
-  display.setCursor(10, 50);
-  display.print("Alarm 1: --:--");
+  canvas->setTextColor(0xFFFF, 0x0000); // white
+  canvas->setTextSize(2);
+  canvas->setCursor(10, 50);
+  canvas->print("Alarm 1: --:--");
 
-  display.setCursor(10, 80);
-  display.print("Status: ");
-  display.print("Inactive");
+  canvas->setCursor(10, 80);
+  canvas->print("Status: ");
+  canvas->print("Inactive");
 
   // Note
-  display.setTextColor(0x7BEF, 0x0000); // gray
-  display.setTextSize(1);
-  display.setCursor(10, 120);
-  display.print("Use app to set alarms");
+  canvas->setTextColor(0x7BEF, 0x0000); // gray
+  canvas->setTextSize(1);
+  canvas->setCursor(10, 120);
+  canvas->print("Use app to set alarms");
+
+  pushToDisplay();
 }
 
 void DisplayManager::drawBatteryScreen() {
-  display.fillScreen(0x0000);
+  if (!canvas)
+    return;
+
+  canvas->fillScreen(0x0000);
 
   // Title
-  display.setTextColor(0x07E0, 0x0000); // green
-  display.setTextSize(3);
-  display.setCursor(10, 10);
-  display.print("BATTERY");
+  canvas->setTextColor(0x07E0, 0x0000); // green
+  canvas->setTextSize(3);
+  canvas->setCursor(10, 10);
+  canvas->print("BATTERY");
 
   // Get battery data
   float batVolt = BatteryManager::getVoltage();
   int batPct = BatteryManager::getPercentage();
 
   // Voltage
-  display.setTextColor(0xFFFF, 0x0000); // white
-  display.setTextSize(2);
-  display.setCursor(10, 50);
-  display.print("Voltage: ");
-  display.print(batVolt, 2);
-  display.print("V");
+  canvas->setTextColor(0xFFFF, 0x0000); // white
+  canvas->setTextSize(2);
+  canvas->setCursor(10, 50);
+  canvas->print("Voltage: ");
+  canvas->print(batVolt, 2);
+  canvas->print("V");
 
   // Percentage
-  display.setCursor(10, 80);
-  display.print("Charge: ");
-  display.print(batPct);
-  display.print("%");
+  canvas->setCursor(10, 80);
+  canvas->print("Charge: ");
+  canvas->print(batPct);
+  canvas->print("%");
 
   // Large battery bar visualization
   int barWidth = map(batPct, 0, 100, 0, 200); // max 200 px width
@@ -149,10 +196,10 @@ void DisplayManager::drawBatteryScreen() {
   int barY = 120;
 
   // Border
-  display.drawRect(barX - 2, barY - 2, 204, 34, 0xFFFF);
+  canvas->drawRect(barX - 2, barY - 2, 204, 34, 0xFFFF);
 
   // Background (dark gray)
-  display.fillRect(barX, barY, 200, 30, 0x2104);
+  canvas->fillRect(barX, barY, 200, 30, 0x2104);
 
   // Fill based on percentage
   uint16_t barColor;
@@ -163,41 +210,48 @@ void DisplayManager::drawBatteryScreen() {
   } else {
     barColor = 0xF800; // red
   }
-  display.fillRect(barX, barY, barWidth, 30, barColor);
+  canvas->fillRect(barX, barY, barWidth, 30, barColor);
 
   // Status text
-  display.setTextColor(0x7BEF, 0x0000); // gray
-  display.setTextSize(1);
-  display.setCursor(10, 170);
-  display.print("GPIO15: Power enabled");
+  canvas->setTextColor(0x7BEF, 0x0000); // gray
+  canvas->setTextSize(1);
+  canvas->setCursor(10, 170);
+  canvas->print("GPIO15: Power enabled");
+
+  pushToDisplay();
 }
 
 void DisplayManager::drawBluetoothScreen() {
-  display.fillScreen(0x0000);
+  if (!canvas)
+    return;
+
+  canvas->fillScreen(0x0000);
 
   // Title
-  display.setTextColor(0x001F, 0x0000); // blue
-  display.setTextSize(3);
-  display.setCursor(10, 10);
-  display.print("BLUETOOTH");
+  canvas->setTextColor(0x001F, 0x0000); // blue
+  canvas->setTextSize(3);
+  canvas->setCursor(10, 10);
+  canvas->print("BLUETOOTH");
 
   // Connection status
-  display.setTextColor(0xFFFF, 0x0000); // white
-  display.setTextSize(2);
-  display.setCursor(10, 50);
-  display.print("Status: ");
-  display.print("Ready");
+  canvas->setTextColor(0xFFFF, 0x0000); // white
+  canvas->setTextSize(2);
+  canvas->setCursor(10, 50);
+  canvas->print("Status: ");
+  canvas->print("Ready");
 
   // Notifications
-  display.setCursor(10, 80);
-  display.print("Notifications:");
+  canvas->setCursor(10, 80);
+  canvas->print("Notifications:");
 
-  display.setTextSize(1);
-  display.setCursor(10, 110);
-  display.print("No new notifications");
+  canvas->setTextSize(1);
+  canvas->setCursor(10, 110);
+  canvas->print("No new notifications");
 
   // Note
-  display.setTextColor(0x7BEF, 0x0000); // gray
-  display.setCursor(10, 140);
-  display.print("Pair with phone for alerts");
+  canvas->setTextColor(0x7BEF, 0x0000); // gray
+  canvas->setCursor(10, 140);
+  canvas->print("Pair with phone for alerts");
+
+  pushToDisplay();
 }
