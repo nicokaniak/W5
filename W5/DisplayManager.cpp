@@ -1,5 +1,6 @@
 #include "DisplayManager.h"
 #include "BatteryManager.h"
+#include "BluetoothManager.h"
 #include "RM67162Display.h"
 #include "WeatherManager.h"
 #include "rm67162.h" // For lcd_PushColors
@@ -234,24 +235,47 @@ void DisplayManager::drawBluetoothScreen() {
   canvas->print("BLUETOOTH");
 
   // Connection status
+  bool connected = BluetoothManager::isConnected();
+
   canvas->setTextColor(0xFFFF, 0x0000); // white
   canvas->setTextSize(2);
   canvas->setCursor(10, 50);
   canvas->print("Status: ");
-  canvas->print("Ready");
+
+  if (connected) {
+    canvas->setTextColor(0x07E0, 0x0000); // green
+    canvas->print("Connected");
+  } else {
+    canvas->setTextColor(0xF800, 0x0000); // red
+    canvas->print("Disconnected");
+  }
+
+  // Device Name
+  canvas->setTextColor(0xFFFF, 0x0000); // white
+  canvas->setCursor(10, 80);
+  canvas->print("Device: Lilygo_Watch");
 
   // Notifications
-  canvas->setCursor(10, 80);
-  canvas->print("Notifications:");
+  canvas->setCursor(10, 110);
+  canvas->print("Last Message:");
 
   canvas->setTextSize(1);
-  canvas->setCursor(10, 110);
-  canvas->print("No new notifications");
-
-  // Note
-  canvas->setTextColor(0x7BEF, 0x0000); // gray
   canvas->setCursor(10, 140);
-  canvas->print("Pair with phone for alerts");
+  String note = BluetoothManager::getNotification();
+  if (note.length() > 0) {
+    canvas->print(note);
+  } else {
+    canvas->print("No new messages");
+  }
+
+  // Instructions
+  if (!connected) {
+    canvas->setTextColor(0x7BEF, 0x0000); // gray
+    canvas->setCursor(10, 170);
+    canvas->print("Pair with 'Lilygo_Watch'");
+    canvas->setCursor(10, 185);
+    canvas->print("Use Serial Bluetooth Terminal");
+  }
 
   pushToDisplay();
 }
