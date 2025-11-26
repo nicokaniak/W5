@@ -1,6 +1,7 @@
 #include "DisplayManager.h"
 #include "BatteryManager.h"
 #include "RM67162Display.h"
+#include "WeatherManager.h"
 
 static RM67162Display display;
 
@@ -52,23 +53,41 @@ void DisplayManager::drawWeatherScreen() {
   display.setCursor(10, 10);
   display.print("WEATHER");
 
-  // Weather info
+  // Get weather data
+  String temp = WeatherManager::getTemperature();
+  String conditions = WeatherManager::getWeatherDescription();
+  String wind = WeatherManager::getWindSpeed();
+
+  // Temperature
   display.setTextColor(0xFFFF, 0x0000); // white
   display.setTextSize(2);
   display.setCursor(10, 50);
-  display.print("Temperature: --");
+  display.print("Temp: ");
+  display.print(temp);
+  display.print(" C");
 
+  // Conditions
   display.setCursor(10, 80);
-  display.print("Conditions: --");
+  display.print("Conditions:");
+  display.setCursor(10, 105);
+  display.setTextSize(2);
+  display.print(conditions);
 
-  display.setCursor(10, 110);
-  display.print("Location: --");
+  // Wind speed
+  display.setCursor(10, 135);
+  display.print("Wind: ");
+  display.print(wind);
+  display.print(" km/h");
 
-  // Note
+  // Location note
   display.setTextColor(0x7BEF, 0x0000); // gray
   display.setTextSize(1);
-  display.setCursor(10, 150);
-  display.print("Weather data from WiFi");
+  display.setCursor(10, 170);
+  display.print("Location: Copenhagen");
+
+  // Update hint
+  display.setCursor(10, 185);
+  display.print("Updates every 60s");
 }
 
 void DisplayManager::drawAlarmsScreen() {

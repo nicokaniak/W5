@@ -4,6 +4,36 @@
 #include <WiFi.h>
 
 static String weatherInfo = "No data";
+static String temperature = "--";
+static String windSpeed = "--";
+static String weatherDescription = "Unknown";
+
+// Convert weather code to description
+String getWeatherCodeDescription(int code) {
+  if (code == 0)
+    return "Clear sky";
+  if (code == 1 || code == 2 || code == 3)
+    return "Partly cloudy";
+  if (code == 45 || code == 48)
+    return "Foggy";
+  if (code == 51 || code == 53 || code == 55)
+    return "Drizzle";
+  if (code == 61 || code == 63 || code == 65)
+    return "Rain";
+  if (code == 71 || code == 73 || code == 75)
+    return "Snow";
+  if (code == 77)
+    return "Snow grains";
+  if (code == 80 || code == 81 || code == 82)
+    return "Rain showers";
+  if (code == 85 || code == 86)
+    return "Snow showers";
+  if (code == 95)
+    return "Thunderstorm";
+  if (code == 96 || code == 99)
+    return "Thunderstorm";
+  return "Unknown";
+}
 
 void WeatherManager::initWeather() {
   WiFi.mode(WIFI_STA);
@@ -47,21 +77,56 @@ void WeatherManager::updateWeather() {
     int httpCode = http.GET();
     if (httpCode == 200) {
       String payload = http.getString();
+
+      // Parse temperature
       int tempIdx = payload.indexOf("\"temperature\":");
       if (tempIdx != -1) {
         int start = tempIdx + 14;
         int end = payload.indexOf(",", start);
-        String tempStr = payload.substring(start, end);
-        weatherInfo = "Temp: " + tempStr + " °C";
+        temperature = payload.substring(start, end);
+        weatherInfo = "Temp: " + temperature + " °C";
         Serial.println("Weather updated: " + weatherInfo);
       }
+
+      // Parse wind speed
+      int windIdx = payload.indexOf("\"windspeed\":");
+      if (windIdx != -1) {
+        int start = windIdx + 12;
+        int end = payload.indexOf(",", start);
+        windSpeed = payload.substring(start, end);
+      }
+
+      // Parse weather code
+      int codeIdx = payload.indexOf("\"weathercode\":");
+      if (codeIdx != -1) {
+        int start = codeIdx + 14;
+        int end = payload.indexOf(",", start);
+        if (end == -1)
+          end = payload.indexOf("}", start);
+        String codeStr = payload.substring(start, end);
+        int code = codeStr.toInt();
+        weatherDescription = getWeatherCodeDescription(code);
+      }
+
     } else {
       Serial.println("Weather API request failed");
+      temperature = "Error";
+      windSpeed = "Error";
+      weatherDescription = "API Error";
     }
     http.end();
   } else {
     Serial.println("WiFi not connected");
+    temperature = "No WiFi";
+    windSpeed = "No WiFi";
+    weatherDescription = "No WiFi";
   }
 }
 
 String WeatherManager::getWeatherInfo() { return weatherInfo; }
+
+String WeatherManager::getTemperature() { return temperature; }
+
+String WeatherManager::getWindSpeed() { return windSpeed; }
+
+String WeatherManager::getWeatherDescription() { return weatherDescription; }
