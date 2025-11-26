@@ -2,7 +2,6 @@
 #include "BatteryManager.h"
 #include "RM67162Display.h"
 
-
 static RM67162Display display;
 
 void DisplayManager::initDisplay() {
@@ -35,11 +34,151 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
 
   // ----- Battery bar (bottom‑right) -----
   int batPct = BatteryManager::getPercentage();
-  int barWidth = map(batPct, 0, 100, 0, 50); // max 50 px width
-  int barX = display.width() - 55;           // 5 px margin from right edge
-  int barY = display.height() - 10;          // 10 px from bottom
+  int barWidth = map(batPct, 0, 100, 0, 50); // max 50 px width
+  int barX = display.width() - 55;           // 5 px margin from right edge
+  int barY = display.height() - 10;          // 10 px from bottom
   // background (light gray)
   display.fillRect(barX, barY, 50, 8, 0x7BEF);
   // fill proportional to charge (green)
   display.fillRect(barX, barY, barWidth, 8, 0x07E0);
+}
+
+void DisplayManager::drawWeatherScreen() {
+  display.fillScreen(0x0000);
+
+  // Title
+  display.setTextColor(0xFFE0, 0x0000); // yellow
+  display.setTextSize(3);
+  display.setCursor(10, 10);
+  display.print("WEATHER");
+
+  // Weather info
+  display.setTextColor(0xFFFF, 0x0000); // white
+  display.setTextSize(2);
+  display.setCursor(10, 50);
+  display.print("Temperature: --");
+
+  display.setCursor(10, 80);
+  display.print("Conditions: --");
+
+  display.setCursor(10, 110);
+  display.print("Location: --");
+
+  // Note
+  display.setTextColor(0x7BEF, 0x0000); // gray
+  display.setTextSize(1);
+  display.setCursor(10, 150);
+  display.print("Weather data from WiFi");
+}
+
+void DisplayManager::drawAlarmsScreen() {
+  display.fillScreen(0x0000);
+
+  // Title
+  display.setTextColor(0xF81F, 0x0000); // magenta
+  display.setTextSize(3);
+  display.setCursor(10, 10);
+  display.print("ALARMS");
+
+  // Alarm info
+  display.setTextColor(0xFFFF, 0x0000); // white
+  display.setTextSize(2);
+  display.setCursor(10, 50);
+  display.print("Alarm 1: --:--");
+
+  display.setCursor(10, 80);
+  display.print("Status: ");
+  display.print("Inactive");
+
+  // Note
+  display.setTextColor(0x7BEF, 0x0000); // gray
+  display.setTextSize(1);
+  display.setCursor(10, 120);
+  display.print("Use app to set alarms");
+}
+
+void DisplayManager::drawBatteryScreen() {
+  display.fillScreen(0x0000);
+
+  // Title
+  display.setTextColor(0x07E0, 0x0000); // green
+  display.setTextSize(3);
+  display.setCursor(10, 10);
+  display.print("BATTERY");
+
+  // Get battery data
+  float batVolt = BatteryManager::getVoltage();
+  int batPct = BatteryManager::getPercentage();
+
+  // Voltage
+  display.setTextColor(0xFFFF, 0x0000); // white
+  display.setTextSize(2);
+  display.setCursor(10, 50);
+  display.print("Voltage: ");
+  display.print(batVolt, 2);
+  display.print("V");
+
+  // Percentage
+  display.setCursor(10, 80);
+  display.print("Charge: ");
+  display.print(batPct);
+  display.print("%");
+
+  // Large battery bar visualization
+  int barWidth = map(batPct, 0, 100, 0, 200); // max 200 px width
+  int barX = 10;
+  int barY = 120;
+
+  // Border
+  display.drawRect(barX - 2, barY - 2, 204, 34, 0xFFFF);
+
+  // Background (dark gray)
+  display.fillRect(barX, barY, 200, 30, 0x2104);
+
+  // Fill based on percentage
+  uint16_t barColor;
+  if (batPct > 50) {
+    barColor = 0x07E0; // green
+  } else if (batPct > 20) {
+    barColor = 0xFFE0; // yellow
+  } else {
+    barColor = 0xF800; // red
+  }
+  display.fillRect(barX, barY, barWidth, 30, barColor);
+
+  // Status text
+  display.setTextColor(0x7BEF, 0x0000); // gray
+  display.setTextSize(1);
+  display.setCursor(10, 170);
+  display.print("GPIO15: Power enabled");
+}
+
+void DisplayManager::drawBluetoothScreen() {
+  display.fillScreen(0x0000);
+
+  // Title
+  display.setTextColor(0x001F, 0x0000); // blue
+  display.setTextSize(3);
+  display.setCursor(10, 10);
+  display.print("BLUETOOTH");
+
+  // Connection status
+  display.setTextColor(0xFFFF, 0x0000); // white
+  display.setTextSize(2);
+  display.setCursor(10, 50);
+  display.print("Status: ");
+  display.print("Ready");
+
+  // Notifications
+  display.setCursor(10, 80);
+  display.print("Notifications:");
+
+  display.setTextSize(1);
+  display.setCursor(10, 110);
+  display.print("No new notifications");
+
+  // Note
+  display.setTextColor(0x7BEF, 0x0000); // gray
+  display.setCursor(10, 140);
+  display.print("Pair with phone for alerts");
 }
