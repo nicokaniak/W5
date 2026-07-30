@@ -9,6 +9,7 @@ public:
   static void checkNotifications();
   static bool hasNewNotification();
   static String getNotification();
+  static bool isConnected();
 };
 
 #endif

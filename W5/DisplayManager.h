@@ -9,6 +9,7 @@ public:
   static void clearDisplay();
   static void drawText(const String &text, int x, int y);
   static void drawWatchFace(const String &timeStr);
+  static void drawMenu(uint8_t selectedIndex);
 };
 
 #endif
