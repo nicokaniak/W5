@@ -5,7 +5,7 @@
 static const char* MENU_ITEMS[] = { "Watch", "Stopwatch", "Configuration" };
 static const uint8_t NUM_ITEMS = 3;
 
-static const uint32_t ANIM_DURATION_MS = 200;  // scroll animation length
+static const uint32_t ANIM_DURATION_MS = 350;  // scroll animation length
 
 AppMode  MenuManager::_mode          = MODE_WATCH;
 uint8_t  MenuManager::_selectedIndex = 0;
@@ -45,9 +45,10 @@ float MenuManager::animProgress() {
   if (!_animating) return 1.0f;
   float t = (float)(millis() - _animStartTime) / (float)ANIM_DURATION_MS;
   if (t >= 1.0f) t = 1.0f;
-  // ponytail: ease-out (1 - (1-t)^2) — items start fast, decelerate as they settle.
-  // Feels more natural than linear for a carousel.
-  return 1.0f - (1.0f - t) * (1.0f - t);
+  // ponytail: smoothstep (t*t*(3-2*t)) — zero velocity at both endpoints.
+  // Items start gently, accelerate through the middle, decelerate to a stop.
+  // Feels like a physical carousel. Was ease-out (1-(1-t)^2) which jumped at t=0.
+  return t * t * (3.0f - 2.0f * t);
 }
 
 void MenuManager::updateAnimation() {

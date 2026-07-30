@@ -108,5 +108,5 @@ void loop() {
       break;
   }
 
-  delay(20); // ~50Hz polling
+  delay(10); // ~100Hz — doubles animation frame rate vs 50Hz for smoother scrolling
 }
