@@ -8,6 +8,9 @@ public:
   static void initWeather();
   static void updateWeather();
   static String getWeatherInfo();
+  static String getTemperature();
+  static String getWindSpeed();
+  static String getWeatherDescription();
 };
 
 #endif

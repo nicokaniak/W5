@@ -72,7 +72,14 @@ void BluetoothManager::initBluetooth() {
   pRxCharacteristic->setCallbacks(new RxCallbacks());
 
   pService->start();
+
+  BLEAdvertising* pAdvertising = BLEDevice::getAdvertising();
+  pAdvertising->addServiceUUID(SERVICE_UUID);
+  pAdvertising->setScanResponse(true);
+  pAdvertising->setMinPreferred(0x06);
+  pAdvertising->setMinPreferred(0x12);
   BLEDevice::startAdvertising();
+
   Serial.println("BLE started, advertising as \"Lilygo_Watch\"");
 #else
   Serial.println("BLE not available in this build.");

@@ -36,7 +36,6 @@ void MenuManager::handleEvent(ButtonEvent evt) {
 
   // ponytail: both-long-press is the universal menu toggle.
   //   In a feature mode -> enter MENU. In MENU -> cancel back to WATCH.
-  //   If you'd rather it return to the previously-selected feature, track _previousMode here.
   if (evt == EVENT_BOTH_LONG_PRESS) {
     if (_mode == MODE_MENU) {
       _mode = MODE_WATCH;
@@ -62,7 +61,7 @@ void MenuManager::handleEvent(ButtonEvent evt) {
       _dirty = true;
       Serial.printf("MENU: scroll down -> %u (%s)\n", _selectedIndex, MENU_ITEMS[_selectedIndex]);
       break;
-    case EVENT_BOTTOM_DOUBLE_CLICK:
+    case EVENT_TOP_DOUBLE_CLICK:
       // ponytail: index mapping must match MENU_ITEMS above
       switch (_selectedIndex) {
         case 0:  _mode = MODE_WATCH;     break;

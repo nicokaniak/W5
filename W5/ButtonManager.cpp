@@ -1,10 +1,10 @@
 #include "ButtonManager.h"
 #include "pins_config.h"
 
-// ponytail: PIN_BUTTON_1 (GPIO 0, BOOT) assumed TOP (scroll up);
-//           PIN_BUTTON_2 (GPIO 21, user) assumed BOTTOM (scroll down + select).
-// The bottom button does double-duty, so it goes on the dedicated user button.
-// If your board's physical layout is reversed, swap _top / _bottom pin assignment below.
+// ponytail: User tested on hardware — GPIO 21 is the physical TOP button,
+// GPIO 0 (BOOT) is the physical BOTTOM button.
+// TOP button does double-duty: scroll up (single click) + select (double-click).
+// BOTTOM button: scroll down only.
 
 static const uint32_t DEBOUNCE_MS        = 20;
 static const uint32_t LONG_PRESS_MS      = 1000;  // both-held threshold to enter/exit menu
@@ -26,8 +26,8 @@ void ButtonManager::emit(ButtonEvent e) {
 }
 
 void ButtonManager::init() {
-  _top.pin    = PIN_BUTTON_1;  // GPIO 0  (BOOT)  -> top    -> scroll up
-  _bottom.pin = PIN_BUTTON_2;  // GPIO 21 (user)  -> bottom -> scroll down + select
+  _top.pin    = PIN_BUTTON_2;  // GPIO 21 (user)  -> physical TOP    -> scroll up + select
+  _bottom.pin = PIN_BUTTON_1;  // GPIO 0  (BOOT)  -> physical BOTTOM -> scroll down
   _top.state    = _bottom.state    = IDLE;
   _top.debounced = _bottom.debounced = false;
   _top.lastRaw  = _bottom.lastRaw  = false;
@@ -110,8 +110,10 @@ void ButtonManager::step(Btn &b, ButtonEvent clickEvt, ButtonEvent doubleClickEv
 }
 
 void ButtonManager::update() {
-  step(_top,    EVENT_TOP_CLICK,      EVENT_NONE);  // top has no double-click action
-  step(_bottom, EVENT_BOTTOM_CLICK,   EVENT_BOTTOM_DOUBLE_CLICK);
+  // TOP button: scroll up (single click) + select (double-click)
+  step(_top,    EVENT_TOP_CLICK,       EVENT_TOP_DOUBLE_CLICK);
+  // BOTTOM button: scroll down only (no double-click action)
+  step(_bottom, EVENT_BOTTOM_CLICK,    EVENT_NONE);
 
   // Both-long-press: both held and the LATER of the two presses is past the threshold
   uint32_t now = millis();

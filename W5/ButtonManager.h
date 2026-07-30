@@ -5,10 +5,10 @@
 
 enum ButtonEvent {
   EVENT_NONE = 0,
-  EVENT_TOP_CLICK,            // top button single click   -> scroll up
+  EVENT_TOP_CLICK,            // top button single click    -> scroll up
   EVENT_BOTTOM_CLICK,         // bottom button single click -> scroll down
-  EVENT_BOTTOM_DOUBLE_CLICK,  // bottom button double click -> select
-  EVENT_BOTH_LONG_PRESS,      // both held ~1s             -> enter/exit menu
+  EVENT_TOP_DOUBLE_CLICK,     // top button double click    -> select
+  EVENT_BOTH_LONG_PRESS,      // both held ~1s              -> enter/exit menu
 };
 
 class ButtonManager {

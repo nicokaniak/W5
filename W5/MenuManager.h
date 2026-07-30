@@ -17,7 +17,7 @@ public:
   static void handleEvent(ButtonEvent evt);
   static AppMode   currentMode();
   static uint8_t   selectedIndex();
-  static bool      consumeDirty();     // true once after a state change, then clears
+  static bool      consumeDirty();
   static uint8_t   menuItemCount();
   static const char* menuItemLabel(uint8_t i);
 

@@ -1,12 +1,14 @@
 #include <Arduino.h>
+#include <driver/gpio.h> // For GPIO hold functionality
 #include "config/config.h"
-#include "TimeManager.h"
 #include "AlarmManager.h"
+#include "BatteryManager.h"
 #include "BluetoothManager.h"
-#include "WeatherManager.h"
-#include "DisplayManager.h"
 #include "ButtonManager.h"
+#include "DisplayManager.h"
 #include "MenuManager.h"
+#include "TimeManager.h"
+#include "WeatherManager.h"
 
 // ponytail: weather was fetched every loop tick (1/sec in the old loop).
 // The new loop runs at ~50Hz for button responsiveness, which would be 50x worse.
@@ -18,17 +20,38 @@ static uint32_t lastWatchRedraw = 0;
 static uint32_t lastWeatherFetch = 0;
 
 void setup() {
+  // ===== CRITICAL: ENABLE POWER FIRST - BEFORE ANYTHING ELSE =====
+  // GPIO15 enables the power circuit for display and battery
+  pinMode(15, OUTPUT);
+  digitalWrite(15, HIGH);
+  gpio_hold_en((gpio_num_t)15);
+  delay(100);
+
+  // GPIO38 enables the backlight
+  pinMode(38, OUTPUT);
+  digitalWrite(38, HIGH);
+  gpio_hold_en((gpio_num_t)38);
+  delay(100);
+
   Serial.begin(115200);
-  delay(1000); // Wait for serial to initialize
+  delay(1000);
   Serial.println("=== W5 Starting ===");
+  Serial.println("Power enabled: GPIO15 + GPIO38 with GPIO hold");
+
+  // Battery monitoring ADC pin
+  pinMode(4, INPUT);
+  Serial.println("Battery monitoring initialized");
+
   Serial.println("Initializing display...");
   DisplayManager::initDisplay();
   Serial.println("Display initialized");
 
+  // WiFi first so NTP can sync
+  WeatherManager::initWeather();
+
   TimeManager::initTime();
   AlarmManager::initAlarms();
   BluetoothManager::initBluetooth();
-  WeatherManager::initWeather();
   ButtonManager::init();
   MenuManager::init();
   Serial.println("Ready");
