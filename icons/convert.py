@@ -17,7 +17,7 @@ ICON_SPECS = [
     ("timer.png",  "TIMER"),   # Stopwatch
     ("cog.png",    "COG"),     # Configuration
 ]
-SIZES = [24, 16]   # selected tier, near tier (far tier = text only, no icon)
+SIZES = [48, 32]   # selected tier, near tier (far tier = text only, no icon)
 
 def pack_1bit(im_luma):
     """im_luma: PIL 'L' mode. Return list of bytes, MSB-first, row-padded."""
@@ -71,24 +71,23 @@ def main():
             chunks.append(emit_array(f"ICON_{sym}_{size}", size, size, data))
             chunks.append("")
     # Lookup helper: returns the PROGMEM array + dims for a menu label index,
-    # or nullptr when there is no icon for that index.
+    # or nullptr when there is no icon for that index. Sizes are data-driven
+    # from SIZES so the lookup can't drift from the emitted arrays.
+    labels = ["Watch", "Stopwatch (timer glyph)", "Configuration (cog glyph)"]
     chunks += [
         "// labelIdx: 0=Watch, 1=Stopwatch(timer), 2=Configuration(cog)",
         "inline const unsigned char* menuIconBitmap(uint8_t labelIdx, uint8_t size,",
         "                                        uint8_t* outW, uint8_t* outH) {",
         "  switch (labelIdx) {",
-        "    case 0:  // Watch",
-        "      if (size == 24) { *outW = 24; *outH = 24; return ICON_WATCH_24; }",
-        "      if (size == 16) { *outW = 16; *outH = 16; return ICON_WATCH_16; }",
-        "      break;",
-        "    case 1:  // Stopwatch -> timer glyph",
-        "      if (size == 24) { *outW = 24; *outH = 24; return ICON_TIMER_24; }",
-        "      if (size == 16) { *outW = 16; *outH = 16; return ICON_TIMER_16; }",
-        "      break;",
-        "    case 2:  // Configuration -> cog glyph",
-        "      if (size == 24) { *outW = 24; *outH = 24; return ICON_COG_24; }",
-        "      if (size == 16) { *outW = 16; *outH = 16; return ICON_COG_16; }",
-        "      break;",
+    ]
+    for i, (_, sym) in enumerate(ICON_SPECS):
+        chunks.append(f"    case {i}:  // {labels[i]}")
+        for s in SIZES:
+            chunks.append(
+                f"      if (size == {s}) {{ *outW = {s}; *outH = {s}; return ICON_{sym}_{s}; }}"
+            )
+        chunks.append("      break;")
+    chunks += [
         "  }",
         "  *outW = 0; *outH = 0;",
         "  return nullptr;",

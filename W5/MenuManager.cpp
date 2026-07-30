@@ -2,7 +2,7 @@
 
 // ponytail: items live here as the single source of truth. DisplayManager queries
 // menuItemLabel(), the select handler maps index -> mode below. Keep both in sync.
-static const char* MENU_ITEMS[] = { "Watch", "Stopwatch", "Configuration" };
+static const char* MENU_ITEMS[] = { "Watch", "Stopwatch", "Config" };
 static const uint8_t NUM_ITEMS = 3;
 
 static const uint32_t ANIM_DURATION_MS = 350;  // scroll animation length

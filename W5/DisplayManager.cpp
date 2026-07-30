@@ -312,15 +312,17 @@ static void drawMenuItem(GFXcanvas16 *c, int16_t cx, int16_t cy, int16_t r,
   String label(MenuManager::menuItemLabel(labelIdx));
 
   // ponytail: three visual tiers based on closeness to center.
-  //   closeness >= 0.6: SELECTED — size 3, white, centered on arc point
-  //   closeness >= 0.25: NEAR — size 2, medium gray, left-anchored
-  //   closeness < 0.25: FAR — size 1, very dim, simulated blur via 3x offset draw
+  //   closeness >= 0.6: SELECTED — size 6, white, left-anchored at arc point
+  //   closeness >= 0.25: NEAR — size 4, medium gray, left-anchored
+  //   closeness < 0.25: FAR — size 2, very dim, simulated blur via 3x offset draw
+  // Text is left-anchored at the arc point and extends toward the outer edge
+  // (rightward) so the block reads as screen-centered, not arc-centered.
   // The blur is faked by printing the text 3 times with 1px offsets in a dim color.
   // Cheap (3 print calls instead of 1) but reads as "out of focus" on AMOLED.
   bool isSelected = (closeness >= 0.6f);
   bool isFar      = (closeness < 0.25f);
 
-  uint8_t  textSize = isSelected ? 3 : (isFar ? 1 : 2);
+  uint8_t  textSize = isSelected ? 6 : (isFar ? 2 : 4);
   uint16_t textCol  = lerp565(0x4208, 0xFFFF, closeness);  // very dark gray -> white
 
   c->setTextSize(textSize);
@@ -329,13 +331,8 @@ static void drawMenuItem(GFXcanvas16 *c, int16_t cx, int16_t cy, int16_t r,
   int16_t x1, y1;
   uint16_t w, h;
   c->getTextBounds(label, 0, 0, &x1, &y1, &w, &h);
-  int16_t tx, ty;
-  if (isSelected) {
-    tx = ax - w / 2 - x1;     // centered on arc point
-  } else {
-    tx = ax - x1;             // left-anchored
-  }
-  ty = ay - h / 2 - y1;
+  int16_t tx = ax - x1;       // left-anchored at arc point, extends toward outer edge
+  int16_t ty = ay - h / 2 - y1;
 
   if (isFar) {
     // ponytail: fake blur — draw 3 copies at 1px offsets in a dimmer color.
@@ -352,10 +349,10 @@ static void drawMenuItem(GFXcanvas16 *c, int16_t cx, int16_t cy, int16_t r,
     c->print(label);
 
     // Icon to the right of the text. Size matches the text tier:
-    //   selected (size 3, 24px tall) -> 24x24 icon
-    //   near      (size 2, 16px tall) -> 16x16 icon
+    //   selected (size 6, 48px tall) -> 48x48 icon
+    //   near      (size 4, 32px tall) -> 32x32 icon
     // Recolored with the same textCol so it dims/brightens with the carousel.
-    uint8_t iconSize = isSelected ? 24 : 16;
+    uint8_t iconSize = isSelected ? 48 : 32;
     uint8_t iw = 0, ih = 0;
     const unsigned char *bm = menuIconBitmap(labelIdx, iconSize, &iw, &ih);
     if (bm) {
