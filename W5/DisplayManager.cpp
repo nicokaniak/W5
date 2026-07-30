@@ -4,6 +4,7 @@
 #include "RM67162Display.h"
 #include "MenuManager.h"
 #include "WeatherManager.h"
+#include "icons.h" // 1-bit PROGMEM menu icons (generated from icons/*.png)
 #include "rm67162.h" // For lcd_PushColors
 #include <math.h>
 
@@ -339,6 +340,8 @@ static void drawMenuItem(GFXcanvas16 *c, int16_t cx, int16_t cy, int16_t r,
   if (isFar) {
     // ponytail: fake blur — draw 3 copies at 1px offsets in a dimmer color.
     // No real Gaussian blur in Adafruit_GFX; this is the cheapest approximation.
+    // Icons skipped on far tier — bitmaps don't fake-blur, and they'd read as
+    // a hard dot next to soft text.
     uint16_t blurCol = lerp565(0x2104, 0x4208, closeness * 4.0f);  // very dim
     c->setTextColor(blurCol, 0x0000);
     c->setCursor(tx,     ty);     c->print(label);
@@ -347,6 +350,19 @@ static void drawMenuItem(GFXcanvas16 *c, int16_t cx, int16_t cy, int16_t r,
   } else {
     c->setCursor(tx, ty);
     c->print(label);
+
+    // Icon to the right of the text. Size matches the text tier:
+    //   selected (size 3, 24px tall) -> 24x24 icon
+    //   near      (size 2, 16px tall) -> 16x16 icon
+    // Recolored with the same textCol so it dims/brightens with the carousel.
+    uint8_t iconSize = isSelected ? 24 : 16;
+    uint8_t iw = 0, ih = 0;
+    const unsigned char *bm = menuIconBitmap(labelIdx, iconSize, &iw, &ih);
+    if (bm) {
+      int16_t iconX = tx + (int16_t)w + 4;  // 4px gap after text
+      int16_t iconY = ay - (int16_t)ih / 2; // vertically centered on arc point
+      c->drawBitmap(iconX, iconY, bm, iw, ih, textCol);
+    }
   }
 }
 
