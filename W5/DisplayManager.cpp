@@ -293,7 +293,7 @@ static uint16_t lerp565(uint16_t a, uint16_t b, float t) {
 }
 
 // Draw one menu item at a given angle on the arc. closeness (0..1) controls
-// visual prominence: 1.0 = selected (large, white, bright dot), 0.0 = dim.
+// visual prominence: 1.0 = selected (large, white, bright dot), 0.0 = tiny, dim, blurred.
 static void drawMenuItem(GFXcanvas16 *c, int16_t cx, int16_t cy, int16_t r,
                          float angleDeg, uint8_t labelIdx, float closeness) {
   if (closeness < 0.0f) closeness = 0.0f;
@@ -303,28 +303,51 @@ static void drawMenuItem(GFXcanvas16 *c, int16_t cx, int16_t cy, int16_t r,
   int16_t ax = cx + (int16_t)(r * cosf(a));
   int16_t ay = cy + (int16_t)(r * sinf(a));
 
-  // Dot: grows from r=3 (dim cyan) to r=6 (bright cyan) as it approaches center
-  uint16_t dotColor = lerp565(0x4210, 0x07FF, closeness);
-  uint8_t  dotRad   = 3 + (uint8_t)(closeness * 3.0f + 0.5f);
+  // Dot: grows from r=2 (very dim) to r=6 (bright cyan) as it approaches center
+  uint16_t dotColor = lerp565(0x2104, 0x07FF, closeness);
+  uint8_t  dotRad   = 2 + (uint8_t)(closeness * 4.0f + 0.5f);
   c->fillCircle(ax, ay, dotRad, dotColor);
 
-  // Text: size 2->3, color gray->white
   String label(MenuManager::menuItemLabel(labelIdx));
-  c->setTextSize(closeness > 0.5f ? 3 : 2);
-  c->setTextColor(lerp565(0x8410, 0xFFFF, closeness), 0x0000);
+
+  // ponytail: three visual tiers based on closeness to center.
+  //   closeness >= 0.6: SELECTED — size 3, white, centered on arc point
+  //   closeness >= 0.25: NEAR — size 2, medium gray, left-anchored
+  //   closeness < 0.25: FAR — size 1, very dim, simulated blur via 3x offset draw
+  // The blur is faked by printing the text 3 times with 1px offsets in a dim color.
+  // Cheap (3 print calls instead of 1) but reads as "out of focus" on AMOLED.
+  bool isSelected = (closeness >= 0.6f);
+  bool isFar      = (closeness < 0.25f);
+
+  uint8_t  textSize = isSelected ? 3 : (isFar ? 1 : 2);
+  uint16_t textCol  = lerp565(0x4208, 0xFFFF, closeness);  // very dark gray -> white
+
+  c->setTextSize(textSize);
+  c->setTextColor(textCol, 0x0000);
 
   int16_t x1, y1;
   uint16_t w, h;
   c->getTextBounds(label, 0, 0, &x1, &y1, &w, &h);
   int16_t tx, ty;
-  if (closeness > 0.5f) {
-    tx = ax - w / 2 - x1;     // centered on arc point (selected style)
+  if (isSelected) {
+    tx = ax - w / 2 - x1;     // centered on arc point
   } else {
-    tx = ax - x1;             // left-anchored (non-selected style)
+    tx = ax - x1;             // left-anchored
   }
   ty = ay - h / 2 - y1;
-  c->setCursor(tx, ty);
-  c->print(label);
+
+  if (isFar) {
+    // ponytail: fake blur — draw 3 copies at 1px offsets in a dimmer color.
+    // No real Gaussian blur in Adafruit_GFX; this is the cheapest approximation.
+    uint16_t blurCol = lerp565(0x2104, 0x4208, closeness * 4.0f);  // very dim
+    c->setTextColor(blurCol, 0x0000);
+    c->setCursor(tx,     ty);     c->print(label);
+    c->setCursor(tx + 1, ty);     c->print(label);
+    c->setCursor(tx,     ty + 1); c->print(label);
+  } else {
+    c->setCursor(tx, ty);
+    c->print(label);
+  }
 }
 
 void DisplayManager::drawMenu(uint8_t selectedIndex, int8_t scrollDir, float t) {
@@ -357,30 +380,32 @@ void DisplayManager::drawMenu(uint8_t selectedIndex, int8_t scrollDir, float t) 
       drawMenuItem(canvas, cx, cy, r, angles[i], idx[i], close);
     }
   } else {
-    // Animated: 4 items slide along the arc. shift = how far they've moved (in degrees).
-    // scrollDir=+1 (down): items slide UP (angles decrease). Old selected -> prev position,
-    //   old next -> selected position, new item enters from below (+120).
-    // scrollDir=-1 (up): items slide DOWN (angles increase). Old selected -> next position,
-    //   old prev -> selected position, new item enters from above (-120).
-    float shift = -scrollDir * 60.0f * t;
+    // Animated: 4 items slide along the arc.
+    // scrollDir=+1 (down): items slide DOWN (angles increase). New selected
+    //   enters from ABOVE (-60 -> 0), old selected slides to +60, etc.
+    // scrollDir=-1 (up): items slide UP (angles decrease). New selected
+    //   enters from BELOW (+60 -> 0), old selected slides to -60, etc.
+    float shift = scrollDir * 60.0f * t;
 
     uint8_t itemIdx[4];
     float baseAngles[4];
 
     if (scrollDir > 0) {
-      // Scrolling down. At t=0: [sel-2, sel-1, sel, sel+1] at [-60, 0, +60, +120]
-      itemIdx[0] = (selectedIndex + count - 2) % count;
-      itemIdx[1] = (selectedIndex + count - 1) % count;
-      itemIdx[2] = selectedIndex;
-      itemIdx[3] = (selectedIndex + 1) % count;
-      baseAngles[0] = -60; baseAngles[1] = 0; baseAngles[2] = 60; baseAngles[3] = 120;
-    } else {
-      // Scrolling up. At t=0: [sel-1, sel, sel+1, sel+2] at [-120, -60, 0, +60]
-      itemIdx[0] = (selectedIndex + count - 1) % count;
-      itemIdx[1] = selectedIndex;
-      itemIdx[2] = (selectedIndex + 1) % count;
-      itemIdx[3] = (selectedIndex + 2) % count;
+      // Scrolling down. At t=0: new item enters from above.
+      // [newNext, newSel, oldSel, oldPrev] at [-120, -60, 0, +60]
+      itemIdx[0] = (selectedIndex + 1) % count;            // new next
+      itemIdx[1] = selectedIndex;                          // new selected
+      itemIdx[2] = (selectedIndex + count - 1) % count;    // old selected (now prev)
+      itemIdx[3] = (selectedIndex + count - 2) % count;    // old prev (slides off bottom)
       baseAngles[0] = -120; baseAngles[1] = -60; baseAngles[2] = 0; baseAngles[3] = 60;
+    } else {
+      // Scrolling up. At t=0: new item enters from below.
+      // [newPrev, newSel, oldSel, oldNext] at [+120, +60, 0, -60]
+      itemIdx[0] = (selectedIndex + count - 1) % count;    // new prev
+      itemIdx[1] = selectedIndex;                          // new selected
+      itemIdx[2] = (selectedIndex + 1) % count;            // old selected (now next)
+      itemIdx[3] = (selectedIndex + 2) % count;            // old next (slides off top)
+      baseAngles[0] = 120; baseAngles[1] = 60; baseAngles[2] = 0; baseAngles[3] = -60;
     }
 
     for (int i = 0; i < 4; i++) {
