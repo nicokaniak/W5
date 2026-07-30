@@ -83,8 +83,14 @@ void loop() {
       break;
     }
     case MODE_MENU:
-      // Redraw only on selection change (dirty flag), not every tick
-      if (MenuManager::consumeDirty()) {
+      if (MenuManager::isAnimating()) {
+        // Drive the slide animation: redraw every frame with interpolated positions
+        MenuManager::updateAnimation();
+        DisplayManager::drawMenu(MenuManager::selectedIndex(),
+                                 MenuManager::scrollDir(),
+                                 MenuManager::animProgress());
+      } else if (MenuManager::consumeDirty()) {
+        // Static redraw (mode entry, animation just finished, etc.)
         DisplayManager::drawMenu(MenuManager::selectedIndex());
       }
       break;

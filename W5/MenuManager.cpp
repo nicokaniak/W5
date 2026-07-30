@@ -5,14 +5,21 @@
 static const char* MENU_ITEMS[] = { "Watch", "Stopwatch", "Configuration" };
 static const uint8_t NUM_ITEMS = 3;
 
+static const uint32_t ANIM_DURATION_MS = 200;  // scroll animation length
+
 AppMode  MenuManager::_mode          = MODE_WATCH;
 uint8_t  MenuManager::_selectedIndex = 0;
 bool     MenuManager::_dirty         = false;
+bool     MenuManager::_animating     = false;
+int8_t   MenuManager::_scrollDir     = 0;
+uint32_t MenuManager::_animStartTime = 0;
 
 void MenuManager::init() {
   _mode = MODE_WATCH;
   _selectedIndex = 0;
   _dirty = false;
+  _animating = false;
+  _scrollDir = 0;
 }
 
 AppMode   MenuManager::currentMode()    { return _mode; }
@@ -31,12 +38,39 @@ const char* MenuManager::menuItemLabel(uint8_t i) {
   return MENU_ITEMS[i];
 }
 
+bool MenuManager::isAnimating() { return _animating; }
+int8_t MenuManager::scrollDir() { return _scrollDir; }
+
+float MenuManager::animProgress() {
+  if (!_animating) return 1.0f;
+  float t = (float)(millis() - _animStartTime) / (float)ANIM_DURATION_MS;
+  if (t >= 1.0f) t = 1.0f;
+  // ponytail: ease-out (1 - (1-t)^2) — items start fast, decelerate as they settle.
+  // Feels more natural than linear for a carousel.
+  return 1.0f - (1.0f - t) * (1.0f - t);
+}
+
+void MenuManager::updateAnimation() {
+  if (!_animating) return;
+  if (millis() - _animStartTime >= ANIM_DURATION_MS) {
+    _animating = false;
+    _scrollDir = 0;
+    _dirty = true;  // one final clean redraw at the settled position
+  }
+}
+
+void MenuManager::startScroll(int8_t dir) {
+  _scrollDir = dir;
+  _animStartTime = millis();
+  _animating = true;
+}
+
 void MenuManager::handleEvent(ButtonEvent evt) {
   if (evt == EVENT_NONE) return;
 
-  // ponytail: both-long-press is the universal menu toggle.
-  //   In a feature mode -> enter MENU. In MENU -> cancel back to WATCH.
   if (evt == EVENT_BOTH_LONG_PRESS) {
+    _animating = false;
+    _scrollDir = 0;
     if (_mode == MODE_MENU) {
       _mode = MODE_WATCH;
     } else {
@@ -48,21 +82,22 @@ void MenuManager::handleEvent(ButtonEvent evt) {
     return;
   }
 
-  if (_mode != MODE_MENU) return;  // other events only matter inside the menu
+  if (_mode != MODE_MENU) return;
 
   switch (evt) {
     case EVENT_TOP_CLICK:
-      _selectedIndex = (_selectedIndex + NUM_ITEMS - 1) % NUM_ITEMS;  // scroll up
-      _dirty = true;
+      _selectedIndex = (_selectedIndex + NUM_ITEMS - 1) % NUM_ITEMS;
+      startScroll(-1);  // scrolling up — items slide down
       Serial.printf("MENU: scroll up -> %u (%s)\n", _selectedIndex, MENU_ITEMS[_selectedIndex]);
       break;
     case EVENT_BOTTOM_CLICK:
-      _selectedIndex = (_selectedIndex + 1) % NUM_ITEMS;  // scroll down
-      _dirty = true;
+      _selectedIndex = (_selectedIndex + 1) % NUM_ITEMS;
+      startScroll(+1);  // scrolling down — items slide up
       Serial.printf("MENU: scroll down -> %u (%s)\n", _selectedIndex, MENU_ITEMS[_selectedIndex]);
       break;
     case EVENT_TOP_DOUBLE_CLICK:
-      // ponytail: index mapping must match MENU_ITEMS above
+      _animating = false;
+      _scrollDir = 0;
       switch (_selectedIndex) {
         case 0:  _mode = MODE_WATCH;     break;
         case 1:  _mode = MODE_STOPWATCH; break;

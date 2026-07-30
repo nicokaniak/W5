@@ -281,67 +281,116 @@ void DisplayManager::drawBluetoothScreen() {
   pushToDisplay();
 }
 
-void DisplayManager::drawMenu(uint8_t selectedIndex) {
+// ponytail: crude RGB565 channel-wise lerp. Not gamma-correct, but you can't
+// tell the difference on a 1.91" AMOLED during a 200ms animation.
+static uint16_t lerp565(uint16_t a, uint16_t b, float t) {
+  int ra = (a >> 11) & 0x1F, ga = (a >> 5) & 0x3F, ba = a & 0x1F;
+  int rb = (b >> 11) & 0x1F, gb = (b >> 5) & 0x3F, bb = b & 0x1F;
+  int r  = ra + (int)((rb - ra) * t);
+  int g  = ga + (int)((gb - ga) * t);
+  int bl = ba + (int)((bb - ba) * t);
+  return (uint16_t)((r << 11) | (g << 5) | bl);
+}
+
+// Draw one menu item at a given angle on the arc. closeness (0..1) controls
+// visual prominence: 1.0 = selected (large, white, bright dot), 0.0 = dim.
+static void drawMenuItem(GFXcanvas16 *c, int16_t cx, int16_t cy, int16_t r,
+                         float angleDeg, uint8_t labelIdx, float closeness) {
+  if (closeness < 0.0f) closeness = 0.0f;
+  if (closeness > 1.0f) closeness = 1.0f;
+
+  float a = angleDeg * M_PI / 180.0f;
+  int16_t ax = cx + (int16_t)(r * cosf(a));
+  int16_t ay = cy + (int16_t)(r * sinf(a));
+
+  // Dot: grows from r=3 (dim cyan) to r=6 (bright cyan) as it approaches center
+  uint16_t dotColor = lerp565(0x4210, 0x07FF, closeness);
+  uint8_t  dotRad   = 3 + (uint8_t)(closeness * 3.0f + 0.5f);
+  c->fillCircle(ax, ay, dotRad, dotColor);
+
+  // Text: size 2->3, color gray->white
+  String label(MenuManager::menuItemLabel(labelIdx));
+  c->setTextSize(closeness > 0.5f ? 3 : 2);
+  c->setTextColor(lerp565(0x8410, 0xFFFF, closeness), 0x0000);
+
+  int16_t x1, y1;
+  uint16_t w, h;
+  c->getTextBounds(label, 0, 0, &x1, &y1, &w, &h);
+  int16_t tx, ty;
+  if (closeness > 0.5f) {
+    tx = ax - w / 2 - x1;     // centered on arc point (selected style)
+  } else {
+    tx = ax - x1;             // left-anchored (non-selected style)
+  }
+  ty = ay - h / 2 - y1;
+  c->setCursor(tx, ty);
+  c->print(label);
+}
+
+void DisplayManager::drawMenu(uint8_t selectedIndex, int8_t scrollDir, float t) {
   if (!canvas)
     return;
 
-  canvas->fillScreen(0x0000);  // black
+  canvas->fillScreen(0x0000);
 
-  // Half-circle: center on the LEFT edge (x=0), vertically centered.
-  // The left half is off-screen, so drawCircle's bounds check crops it for free.
-  // Draw 3 concentric circles for a thick, visible arc (1px was invisible on AMOLED).
+  // Half-circle arc: center on LEFT edge, vertically centered, 3px thick bright cyan
   const int16_t cx = 0;
   const int16_t cy = canvas->height() / 2;   // 120
   const int16_t r  = 115;
-  const uint16_t arcColor = 0x07FF;          // bright cyan — was 0x8410 (invisible dim gray)
+  const uint16_t arcColor = 0x07FF;
   canvas->drawCircle(cx, cy, r - 1, arcColor);
   canvas->drawCircle(cx, cy, r,     arcColor);
   canvas->drawCircle(cx, cy, r + 1, arcColor);
 
-  // 3 items on the visible right half of the arc:
-  //   selected at angle 0   (3 o'clock, rightmost = (r, cy))
-  //   previous at -60 deg   (upper)
-  //   next     at +60 deg   (lower)
-  const float anglesDeg[3] = { -60.0f, 0.0f, 60.0f };
   const uint8_t count = MenuManager::menuItemCount();
-  uint8_t prevIdx = (selectedIndex + count - 1) % count;
-  uint8_t nextIdx = (selectedIndex + 1) % count;
-  uint8_t indices[3] = { prevIdx, selectedIndex, nextIdx };
 
-  for (int i = 0; i < 3; i++) {
-    float a = anglesDeg[i] * M_PI / 180.0f;
-    int16_t ax = cx + (int16_t)(r * cosf(a));
-    int16_t ay = cy + (int16_t)(r * sinf(a));
-    bool selected = (i == 1);
+  if (scrollDir == 0) {
+    // Static: 3 items at -60, 0, +60 degrees
+    float angles[3] = { -60.0f, 0.0f, 60.0f };
+    uint8_t idx[3] = {
+      (uint8_t)((selectedIndex + count - 1) % count),
+      selectedIndex,
+      (uint8_t)((selectedIndex + 1) % count)
+    };
+    for (int i = 0; i < 3; i++) {
+      float close = (i == 1) ? 1.0f : 0.0f;
+      drawMenuItem(canvas, cx, cy, r, angles[i], idx[i], close);
+    }
+  } else {
+    // Animated: 4 items slide along the arc. shift = how far they've moved (in degrees).
+    // scrollDir=+1 (down): items slide UP (angles decrease). Old selected -> prev position,
+    //   old next -> selected position, new item enters from below (+120).
+    // scrollDir=-1 (up): items slide DOWN (angles increase). Old selected -> next position,
+    //   old prev -> selected position, new item enters from above (-120).
+    float shift = -scrollDir * 60.0f * t;
 
-    // Filled dot at each item position on the arc — makes the carousel structure visible
-    // Selected: bigger cyan dot. Others: smaller dark-cyan dot.
-    if (selected) {
-      canvas->fillCircle(ax, ay, 6, 0x07FF);  // bright cyan, radius 6
+    uint8_t itemIdx[4];
+    float baseAngles[4];
+
+    if (scrollDir > 0) {
+      // Scrolling down. At t=0: [sel-2, sel-1, sel, sel+1] at [-60, 0, +60, +120]
+      itemIdx[0] = (selectedIndex + count - 2) % count;
+      itemIdx[1] = (selectedIndex + count - 1) % count;
+      itemIdx[2] = selectedIndex;
+      itemIdx[3] = (selectedIndex + 1) % count;
+      baseAngles[0] = -60; baseAngles[1] = 0; baseAngles[2] = 60; baseAngles[3] = 120;
     } else {
-      canvas->fillCircle(ax, ay, 3, 0x4210);  // dim cyan, radius 3
+      // Scrolling up. At t=0: [sel-1, sel, sel+1, sel+2] at [-120, -60, 0, +60]
+      itemIdx[0] = (selectedIndex + count - 1) % count;
+      itemIdx[1] = selectedIndex;
+      itemIdx[2] = (selectedIndex + 1) % count;
+      itemIdx[3] = (selectedIndex + 2) % count;
+      baseAngles[0] = -120; baseAngles[1] = -60; baseAngles[2] = 0; baseAngles[3] = 60;
     }
 
-    String label(MenuManager::menuItemLabel(indices[i]));
-
-    // Selected: size 3 white, centered on arc point.
-    // Others:   size 2 gray, left-anchored at arc point (text grows rightward into screen).
-    canvas->setTextSize(selected ? 3 : 2);
-    canvas->setTextColor(selected ? 0xFFFF : 0x8410, 0x0000);  // white vs gray
-
-    int16_t x1, y1;
-    uint16_t w, h;
-    canvas->getTextBounds(label, 0, 0, &x1, &y1, &w, &h);
-    int16_t tx, ty;
-    if (selected) {
-      tx = ax - w / 2 - x1;
-      ty = ay - h / 2 - y1;
-    } else {
-      tx = ax - x1;            // left edge at arc point
-      ty = ay - h / 2 - y1;    // vertically centered on arc point
+    for (int i = 0; i < 4; i++) {
+      float angle = baseAngles[i] + shift;
+      // Skip items that have slid off the visible half-arc
+      if (angle < -95.0f || angle > 95.0f) continue;
+      // Closeness to center (angle 0): 1.0 at center, 0.0 at +/-60, negative beyond
+      float closeness = 1.0f - fabs(angle) / 60.0f;
+      drawMenuItem(canvas, cx, cy, r, angle, itemIdx[i], closeness);
     }
-    canvas->setCursor(tx, ty);
-    canvas->print(label);
   }
 
   pushToDisplay();

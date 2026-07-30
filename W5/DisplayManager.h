@@ -10,7 +10,7 @@ public:
   static void clearDisplay();
   static void drawText(const String &text, int x, int y);
   static void drawWatchFace(const String &timeStr);
-  static void drawMenu(uint8_t selectedIndex);
+  static void drawMenu(uint8_t selectedIndex, int8_t scrollDir = 0, float animProgress = 1.0f);
   static void drawWeatherScreen();
   static void drawAlarmsScreen();
   static void drawBatteryScreen();
