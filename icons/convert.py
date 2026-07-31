@@ -16,6 +16,7 @@ ICON_SPECS = [
     ("watch.png",  "WATCH"),
     ("timer.png",  "TIMER"),   # Stopwatch
     ("cog.png",    "COG"),     # Configuration
+    ("wifi.png",   "WIFI"),    # WiFi status (not a menu item, but shares the pipeline)
 ]
 SIZES = [48, 32]   # selected tier, near tier (far tier = text only, no icon)
 
@@ -73,9 +74,9 @@ def main():
     # Lookup helper: returns the PROGMEM array + dims for a menu label index,
     # or nullptr when there is no icon for that index. Sizes are data-driven
     # from SIZES so the lookup can't drift from the emitted arrays.
-    labels = ["Watch", "Stopwatch (timer glyph)", "Configuration (cog glyph)"]
+    labels = ["Watch", "Stopwatch (timer glyph)", "Configuration (cog glyph)", "WiFi (status indicator)"]
     chunks += [
-        "// labelIdx: 0=Watch, 1=Stopwatch(timer), 2=Configuration(cog)",
+        "// labelIdx: 0=Watch, 1=Stopwatch(timer), 2=Configuration(cog), 3=WiFi(status)",
         "inline const unsigned char* menuIconBitmap(uint8_t labelIdx, uint8_t size,",
         "                                        uint8_t* outW, uint8_t* outH) {",
         "  switch (labelIdx) {",

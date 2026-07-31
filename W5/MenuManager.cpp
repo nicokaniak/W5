@@ -88,12 +88,12 @@ void MenuManager::handleEvent(ButtonEvent evt) {
   switch (evt) {
     case EVENT_TOP_CLICK:
       _selectedIndex = (_selectedIndex + NUM_ITEMS - 1) % NUM_ITEMS;
-      startScroll(-1);  // scrolling up — items slide down
+      startScroll(+1);  // scroll up — items slide DOWN, new selected enters from above
       Serial.printf("MENU: scroll up -> %u (%s)\n", _selectedIndex, MENU_ITEMS[_selectedIndex]);
       break;
     case EVENT_BOTTOM_CLICK:
       _selectedIndex = (_selectedIndex + 1) % NUM_ITEMS;
-      startScroll(+1);  // scrolling down — items slide up
+      startScroll(-1);  // scroll down — items slide UP, new selected enters from below
       Serial.printf("MENU: scroll down -> %u (%s)\n", _selectedIndex, MENU_ITEMS[_selectedIndex]);
       break;
     case EVENT_TOP_DOUBLE_CLICK:

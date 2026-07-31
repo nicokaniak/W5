@@ -57,7 +57,7 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
   // Draw to off-screen buffer
   canvas->fillScreen(0x0000);
   canvas->setTextColor(0x07FF, 0x0000); // cyan
-  canvas->setTextSize(4);
+  canvas->setTextSize(8);
 
   int16_t x1, y1;
   uint16_t w, h;
@@ -293,6 +293,34 @@ static uint16_t lerp565(uint16_t a, uint16_t b, float t) {
   return (uint16_t)((r << 11) | (g << 5) | bl);
 }
 
+void DisplayManager::drawWifiConnecting() {
+  if (!canvas)
+    return;
+
+  canvas->fillScreen(0x0000);
+
+  // Pulse: 0..1 oscillation, ~1.9s period
+  float phase = sinf(millis() / 300.0f) * 0.5f + 0.5f;
+  uint16_t iconColor = lerp565(0x2104, 0x07FF, phase); // dark gray -> bright cyan
+
+  // Centered 48x48 wifi icon, slightly above center to leave room for text
+  int16_t iconX = (canvas->width() - 48) / 2;   // 244
+  int16_t iconY = (canvas->height() - 48) / 2 - 15; // 81
+  canvas->drawBitmap(iconX, iconY, ICON_WIFI_48, 48, 48, iconColor);
+
+  // "Connecting..." text below
+  canvas->setTextColor(0x7BEF, 0x0000); // gray
+  canvas->setTextSize(2);
+  const char *msg = "Connecting...";
+  int16_t x1, y1;
+  uint16_t w, h;
+  canvas->getTextBounds(msg, 0, 0, &x1, &y1, &w, &h);
+  canvas->setCursor((canvas->width() - w) / 2 - x1, iconY + 48 + 10);
+  canvas->print(msg);
+
+  pushToDisplay();
+}
+
 // Draw one menu item at a given angle on the arc. closeness (0..1) controls
 // visual prominence: 1.0 = selected (large, white, bright dot), 0.0 = tiny, dim, blurred.
 static void drawMenuItem(GFXcanvas16 *c, int16_t cx, int16_t cy, int16_t r,
@@ -394,31 +422,33 @@ void DisplayManager::drawMenu(uint8_t selectedIndex, int8_t scrollDir, float t) 
     }
   } else {
     // Animated: 4 items slide along the arc.
-    // scrollDir=+1 (down): items slide DOWN (angles increase). New selected
-    //   enters from ABOVE (-60 -> 0), old selected slides to +60, etc.
-    // scrollDir=-1 (up): items slide UP (angles decrease). New selected
-    //   enters from BELOW (+60 -> 0), old selected slides to -60, etc.
-    float shift = scrollDir * 60.0f * t;
+    // scrollDir=+1 (down): items move UP (angles decrease). The item that was
+    //   BELOW (next) slides up to center, old selected slides up to top.
+    //   New item enters from below. Like scrolling a list down.
+    // scrollDir=-1 (up): items move DOWN (angles increase). The item that was
+    //   ABOVE (prev) slides down to center, old selected slides down to bottom.
+    //   New item enters from above. Like scrolling a list up.
+    float shift = -scrollDir * 60.0f * t;
 
     uint8_t itemIdx[4];
     float baseAngles[4];
 
     if (scrollDir > 0) {
-      // Scrolling down. At t=0: new item enters from above.
-      // [newNext, newSel, oldSel, oldPrev] at [-120, -60, 0, +60]
-      itemIdx[0] = (selectedIndex + 1) % count;            // new next
-      itemIdx[1] = selectedIndex;                          // new selected
-      itemIdx[2] = (selectedIndex + count - 1) % count;    // old selected (now prev)
-      itemIdx[3] = (selectedIndex + count - 2) % count;    // old prev (slides off bottom)
-      baseAngles[0] = -120; baseAngles[1] = -60; baseAngles[2] = 0; baseAngles[3] = 60;
+      // Scrolling down: items slide UP. New selected enters from BELOW.
+      // [oldPrev, oldSel, newSel, newNext] at [-60, 0, +60, +120]
+      itemIdx[0] = (selectedIndex + count - 2) % count;    // old prev (slides off top)
+      itemIdx[1] = (selectedIndex + count - 1) % count;    // old selected (moves to top)
+      itemIdx[2] = selectedIndex;                          // new selected (moves to center from below)
+      itemIdx[3] = (selectedIndex + 1) % count;            // new next (enters from bottom)
+      baseAngles[0] = -60; baseAngles[1] = 0; baseAngles[2] = 60; baseAngles[3] = 120;
     } else {
-      // Scrolling up. At t=0: new item enters from below.
-      // [newPrev, newSel, oldSel, oldNext] at [+120, +60, 0, -60]
-      itemIdx[0] = (selectedIndex + count - 1) % count;    // new prev
-      itemIdx[1] = selectedIndex;                          // new selected
-      itemIdx[2] = (selectedIndex + 1) % count;            // old selected (now next)
-      itemIdx[3] = (selectedIndex + 2) % count;            // old next (slides off top)
-      baseAngles[0] = 120; baseAngles[1] = 60; baseAngles[2] = 0; baseAngles[3] = -60;
+      // Scrolling up: items slide DOWN. New selected enters from ABOVE.
+      // [newPrev, newSel, oldSel, oldNext] at [-120, -60, 0, +60]
+      itemIdx[0] = (selectedIndex + count - 1) % count;    // new prev (enters from top)
+      itemIdx[1] = selectedIndex;                          // new selected (moves to center from above)
+      itemIdx[2] = (selectedIndex + 1) % count;            // old selected (moves to bottom)
+      itemIdx[3] = (selectedIndex + 2) % count;            // old next (slides off bottom)
+      baseAngles[0] = -120; baseAngles[1] = -60; baseAngles[2] = 0; baseAngles[3] = 60;
     }
 
     for (int i = 0; i < 4; i++) {

@@ -7,7 +7,7 @@ struct WifiCreds {
 };
 
 // Add your networks here. The code will try them in order.
-static const WifiCreds WIFI_NETWORKS[] = {{"TN-CV8441", "6ShrynreacBo"},
+static const WifiCreds WIFI_NETWORKS[] = {{"WifiD680", "4b39hd214"},
                                           {"MashWIFI_6Ghz", "SPV01Udupi"},
                                           {"MASHWIFI", "SPV01Udupi"}};
 

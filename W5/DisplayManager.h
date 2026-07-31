@@ -15,6 +15,7 @@ public:
   static void drawAlarmsScreen();
   static void drawBatteryScreen();
   static void drawBluetoothScreen();
+  static void drawWifiConnecting();
 
 private:
   static GFXcanvas16 *canvas;

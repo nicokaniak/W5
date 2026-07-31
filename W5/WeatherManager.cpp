@@ -1,5 +1,6 @@
 #include "WeatherManager.h"
 #include "config/config.h"
+#include "DisplayManager.h"
 #include <HTTPClient.h>
 #include <WiFi.h>
 
@@ -35,36 +36,70 @@ String getWeatherCodeDescription(int code) {
   return "Unknown";
 }
 
+// Try one network, showing pulsing wifi icon during the 10s connect window.
+static bool tryConnect(const char *ssid, const char *password) {
+  Serial.printf("Connecting to \"%s\"...\n", ssid);
+  WiFi.begin(ssid, password);
+
+  int retryCount = 0;
+  while (WiFi.status() != WL_CONNECTED && retryCount < 20) {
+    DisplayManager::drawWifiConnecting();
+    delay(200);
+    retryCount++;
+  }
+  Serial.println();
+  return WiFi.status() == WL_CONNECTED;
+}
+
 void WeatherManager::initWeather() {
   WiFi.mode(WIFI_STA);
   WiFi.disconnect(true);
-  delay(1000);
+  delay(500);
 
-  for (int i = 0; i < WIFI_NETWORK_COUNT; i++) {
-    Serial.print("Connecting to ");
-    Serial.println(WIFI_NETWORKS[i].ssid);
+  bool connected = false;
 
-    WiFi.begin(WIFI_NETWORKS[i].ssid, WIFI_NETWORKS[i].password);
+  // Phase 1: Scan for open (unencrypted) networks
+  Serial.println("Scanning for open WiFi networks...");
+  WiFi.scanNetworks(true); // async
+  int scanWait = 0;
+  while (WiFi.scanComplete() < 0 && scanWait < 100) {
+    DisplayManager::drawWifiConnecting();
+    delay(100);
+    scanWait++;
+  }
 
-    int retryCount = 0;
-    while (WiFi.status() != WL_CONNECTED && retryCount < 20) {
-      delay(500);
-      Serial.print(".");
-      retryCount++;
-    }
-    Serial.println();
-
-    if (WiFi.status() == WL_CONNECTED) {
-      Serial.println("Connected to WiFi");
-      return;
-    } else {
-      Serial.print("Failed to connect. Status: ");
-      Serial.println(WiFi.status());
-      WiFi.disconnect(true);
-      delay(2000);
+  int scanCount = WiFi.scanComplete();
+  if (scanCount > 0) {
+    for (int i = 0; i < scanCount && !connected; i++) {
+      if (WiFi.encryptionType(i) == WIFI_AUTH_OPEN) {
+        if (tryConnect(WiFi.SSID(i).c_str(), "")) {
+          Serial.println("Connected to open network");
+          connected = true;
+        } else {
+          WiFi.disconnect(true);
+          delay(500);
+        }
+      }
     }
   }
-  Serial.println("Could not connect to any WiFi network.");
+  WiFi.scanDelete();
+
+  // Phase 2: Fall back to saved networks
+  if (!connected) {
+    for (int i = 0; i < WIFI_NETWORK_COUNT; i++) {
+      if (tryConnect(WIFI_NETWORKS[i].ssid, WIFI_NETWORKS[i].password)) {
+        Serial.println("Connected to saved network");
+        connected = true;
+        break;
+      }
+      WiFi.disconnect(true);
+      delay(1000);
+    }
+  }
+
+  if (!connected) {
+    Serial.println("Could not connect to any WiFi network.");
+  }
 }
 
 void WeatherManager::updateWeather() {
