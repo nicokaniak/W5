@@ -7,7 +7,7 @@
 // BOTTOM button: scroll down only.
 
 static const uint32_t DEBOUNCE_MS        = 20;
-static const uint32_t LONG_PRESS_MS      = 1000;  // both-held threshold to enter/exit menu
+static const uint32_t LONG_PRESS_MS      = 500;   // both-held threshold to enter/exit menu
 static const uint32_t DOUBLE_CLICK_MS    = 300;   // window between clicks of a double-click
 static const uint32_t SHORT_PRESS_MAX_MS = 400;   // press shorter than this is a click candidate
 

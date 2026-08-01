@@ -58,43 +58,50 @@ void WeatherManager::initWeather() {
 
   bool connected = false;
 
-  // Phase 1: Scan for open (unencrypted) networks
-  Serial.println("Scanning for open WiFi networks...");
-  WiFi.scanNetworks(true); // async
-  int scanWait = 0;
-  while (WiFi.scanComplete() < 0 && scanWait < 100) {
-    DisplayManager::drawWifiConnecting();
-    delay(100);
-    scanWait++;
+  // Phase 1: Saved networks first — these have real internet, so NTP/weather
+  // work. Open networks used to be tried first, which often latched onto a
+  // captive portal: WiFi showed "connected" but NTP couldn't reach the internet,
+  // leaving the clock stuck at 00:00:00.
+  for (int i = 0; i < WIFI_NETWORK_COUNT; i++) {
+    if (tryConnect(WIFI_NETWORKS[i].ssid, WIFI_NETWORKS[i].password)) {
+      Serial.println("Connected to saved network");
+      connected = true;
+      break;
+    }
+    WiFi.disconnect(true);
+    delay(1000);
   }
 
-  int scanCount = WiFi.scanComplete();
-  if (scanCount > 0) {
-    for (int i = 0; i < scanCount && !connected; i++) {
-      if (WiFi.encryptionType(i) == WIFI_AUTH_OPEN) {
-        if (tryConnect(WiFi.SSID(i).c_str(), "")) {
-          Serial.println("Connected to open network");
-          connected = true;
-        } else {
-          WiFi.disconnect(true);
-          delay(500);
+  // Phase 2: Fall back to any open (unencrypted) network — best-effort time
+  // sync when no saved network is in range.
+  // ponytail: ceiling — an open network that's a captive portal still reports
+  // WL_CONNECTED but has no internet, so NTP silently fails. Upgrade path:
+  // probe a cheap HTTP HEAD (e.g. http://pool.ntp.org) before accepting it.
+  if (!connected) {
+    Serial.println("Scanning for open WiFi networks...");
+    WiFi.scanNetworks(true); // async
+    int scanWait = 0;
+    while (WiFi.scanComplete() < 0 && scanWait < 100) {
+      DisplayManager::drawWifiConnecting();
+      delay(100);
+      scanWait++;
+    }
+
+    int scanCount = WiFi.scanComplete();
+    if (scanCount > 0) {
+      for (int i = 0; i < scanCount && !connected; i++) {
+        if (WiFi.encryptionType(i) == WIFI_AUTH_OPEN) {
+          if (tryConnect(WiFi.SSID(i).c_str(), "")) {
+            Serial.println("Connected to open network");
+            connected = true;
+          } else {
+            WiFi.disconnect(true);
+            delay(500);
+          }
         }
       }
     }
-  }
-  WiFi.scanDelete();
-
-  // Phase 2: Fall back to saved networks
-  if (!connected) {
-    for (int i = 0; i < WIFI_NETWORK_COUNT; i++) {
-      if (tryConnect(WIFI_NETWORKS[i].ssid, WIFI_NETWORKS[i].password)) {
-        Serial.println("Connected to saved network");
-        connected = true;
-        break;
-      }
-      WiFi.disconnect(true);
-      delay(1000);
-    }
+    WiFi.scanDelete();
   }
 
   if (!connected) {
