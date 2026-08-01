@@ -38,24 +38,31 @@ bool StopwatchManager::consumeDirty() {
 void StopwatchManager::handleEvent(ButtonEvent evt) {
   switch (evt) {
     case EVENT_TOP_CLICK:
-      // Start (from idle) or resume (from stopped)
+      // Start (from idle/stopped) or stop (when running)
       if (_state == IDLE || _state == STOPPED) {
         _segmentStart = millis();
         _state = RUNNING;
         _dirty = true;
         Serial.println("SW: start/resume");
+      } else if (_state == RUNNING) {
+        _accumulated += millis() - _segmentStart;
+        _state = STOPPED;
+        _dirty = true;
+        Serial.println("SW: stop");
       }
       break;
 
     case EVENT_BOTTOM_CLICK:
       if (_state == RUNNING) {
-        // Stop (pause) — freeze elapsed
-        _accumulated += millis() - _segmentStart;
-        _state = STOPPED;
+        // Lap — record split since prior lap, keep running
+        uint32_t el = getElapsedMs();
+        _lastLapSplit = el - _lapBaseElapsed;
+        _lapBaseElapsed = el;
+        _lapCount++;
         _dirty = true;
-        Serial.println("SW: stop");
+        Serial.printf("SW: lap %u = %lums\n", _lapCount, _lastLapSplit);
       } else if (_state == STOPPED) {
-        // Second stop press -> reset
+        // Reset to idle
         _accumulated = 0;
         _lapBaseElapsed = 0;
         _lastLapSplit = 0;
@@ -63,18 +70,6 @@ void StopwatchManager::handleEvent(ButtonEvent evt) {
         _state = IDLE;
         _dirty = true;
         Serial.println("SW: reset");
-      }
-      break;
-
-    case EVENT_TOP_DOUBLE_CLICK:
-      // Lap (only meaningful while running)
-      if (_state == RUNNING) {
-        uint32_t el = getElapsedMs();
-        _lastLapSplit = el - _lapBaseElapsed;
-        _lapBaseElapsed = el;
-        _lapCount++;
-        _dirty = true;
-        Serial.printf("SW: lap %u = %lums\n", _lapCount, _lastLapSplit);
       }
       break;
 

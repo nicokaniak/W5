@@ -5,9 +5,8 @@
 #include "ButtonManager.h"
 
 // Two-button stopwatch state machine.
-//   TOP click        -> Start (idle) / Resume (stopped)
-//   BOTTOM click     -> Stop (running) / Reset (already stopped)
-//   TOP double-click -> Lap (running only; records split since prior lap)
+//   TOP click        -> Start (idle/stopped) / Stop (running)
+//   BOTTOM click     -> Lap (running; records split since prior lap) / Reset (stopped)
 //   BOTH long-press  -> exit to menu (handled by MenuManager)
 class StopwatchManager {
 public:

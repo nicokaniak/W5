@@ -385,7 +385,7 @@ void DisplayManager::drawStopwatch() {
   }
 
   // Controls hint (bottom, tiny gray)
-  const char *hint = "TOP:START  BOT:STOP/RST  DBL:LAP";
+  const char *hint = "TOP:START/STOP  BOT:LAP/RST";
   canvas->setTextSize(1);
   canvas->setTextColor(0x7BEF, 0x0000); // gray
   canvas->getTextBounds(hint, 0, 0, &x1, &y1, &w, &h);
