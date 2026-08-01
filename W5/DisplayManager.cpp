@@ -13,6 +13,67 @@
 static RM67162Display display;
 GFXcanvas16 *DisplayManager::canvas = nullptr;
 
+// ----- Dot-matrix text rendering (classic LED-matrix look) -----
+// Prints text to a 1-bit scratch buffer with the built-in glcdfont at size 1,
+// then stamps each set pixel as a filled circle pitched by `size`. Reuses the
+// font already shipped with Adafruit_GFX — no external font file or dependency.
+// Bounds are cell-based and symmetric (dots centered in their cells), so
+// centering the cell block also centers the ink: w = strlen*6*size, h = 8*size.
+// ponytail: fixed 536x8 scratch (one screen-width at size 1). Ceiling: strings
+// longer than ~89 chars clip. Upgrade: dynamic scratch or line-wrap.
+static const int16_t DOT_SCRATCH_W = 536;
+static const int16_t DOT_SCRATCH_H = 8;
+static GFXcanvas1 *g_dotScratch = nullptr;
+
+static uint8_t dotRadius(uint8_t size) {
+  if (size >= 4) return size / 2 - 1; // 8->3, 6->2, 4->1 (1px gap between dots)
+  if (size >= 2) return 1;            // 3->1, 2->1 (dots touch, chunky)
+  return 0;                           // 1 -> single pixel (no dot aesthetic)
+}
+
+static void dotTextBounds(const char *s, uint8_t size, uint16_t *w, uint16_t *h) {
+  if (!s) {
+    if (w) *w = 0;
+    if (h) *h = 0;
+    return;
+  }
+  if (w) *w = (uint16_t)strlen(s) * 6 * size;
+  if (h) *h = (uint16_t)8 * size;
+}
+
+static void dotText(GFXcanvas16 *c, const char *s, int16_t x, int16_t y,
+                    uint8_t size, uint16_t color) {
+  if (!c || !g_dotScratch || !s || !*s)
+    return;
+  const uint8_t pitch = size;
+  const uint8_t r = dotRadius(size);
+
+  // Render the string to the 1-bit scratch at size 1.
+  g_dotScratch->fillScreen(0);
+  g_dotScratch->setCursor(0, 0);
+  g_dotScratch->setTextColor(1, 0);
+  g_dotScratch->setTextSize(1);
+  g_dotScratch->print(s);
+
+  // Stamp each set pixel as a dot, centered in its pitch-sized cell.
+  int16_t textW = (int16_t)strlen(s) * 6;
+  if (textW > DOT_SCRATCH_W)
+    textW = DOT_SCRATCH_W;
+  const int16_t half = pitch / 2;
+  for (int16_t row = 0; row < DOT_SCRATCH_H; row++) {
+    for (int16_t col = 0; col < textW; col++) {
+      if (!g_dotScratch->getPixel(col, row))
+        continue;
+      int16_t dx = x + col * pitch + half;
+      int16_t dy = y + row * pitch + half;
+      if (r == 0)
+        c->drawPixel(dx, dy, color);
+      else
+        c->fillCircle(dx, dy, r, color);
+    }
+  }
+}
+
 void DisplayManager::initDisplay() {
   display.begin();
   display.setRotation(1);     // Landscape
@@ -25,6 +86,14 @@ void DisplayManager::initDisplay() {
     Serial.println("Canvas allocated successfully");
   } else {
     Serial.println("Canvas allocation FAILED!");
+  }
+
+  // 1-bit scratch for dot-matrix text rendering (536x8 = 536 bytes).
+  g_dotScratch = new GFXcanvas1(DOT_SCRATCH_W, DOT_SCRATCH_H);
+  if (g_dotScratch) {
+    Serial.println("Dot-matrix scratch allocated");
+  } else {
+    Serial.println("Dot-matrix scratch allocation FAILED!");
   }
 }
 
@@ -45,10 +114,7 @@ void DisplayManager::drawText(const String &text, int x, int y) {
   if (!canvas)
     return;
   canvas->fillScreen(0x0000);
-  canvas->setTextColor(0xFFFF, 0x0000); // white on black
-  canvas->setTextSize(3);
-  canvas->setCursor(x, y);
-  canvas->print(text);
+  dotText(canvas, text.c_str(), x, y, 3, 0xFFFF); // white, size 3
   pushToDisplay();
 }
 
@@ -58,24 +124,17 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
 
   // Draw to off-screen buffer
   canvas->fillScreen(0x0000);
-  canvas->setTextColor(0x07FF, 0x0000); // cyan
-  canvas->setTextSize(8);
 
-  int16_t x1, y1;
   uint16_t w, h;
-  canvas->getTextBounds(timeStr, 0, 0, &x1, &y1, &w, &h);
-  int16_t x = (canvas->width() - w) / 2 - x1;
-  int16_t y = (canvas->height() - h) / 2 - y1;
-  canvas->setCursor(x, y);
-  canvas->print(timeStr);
+  dotTextBounds(timeStr.c_str(), 8, &w, &h);
+  int16_t x = (canvas->width() - w) / 2;
+  int16_t y = (canvas->height() - h) / 2;
+  dotText(canvas, timeStr.c_str(), x, y, 8, 0x07FF); // cyan, size 8
 
   // ----- Date (top-left, small) -----
   String dateStr = TimeManager::getCurrentDate();
   if (dateStr.length()) {
-    canvas->setTextColor(0x07FF, 0x0000); // cyan, same as time
-    canvas->setTextSize(4);
-    canvas->setCursor(8, 8);
-    canvas->print(dateStr);
+    dotText(canvas, dateStr.c_str(), 8, 8, 4, 0x07FF); // cyan, same as time
   }
 
   // ----- Battery bar (bottom-right) -----
@@ -99,10 +158,7 @@ void DisplayManager::drawWeatherScreen() {
   canvas->fillScreen(0x0000);
 
   // Title
-  canvas->setTextColor(0xFFE0, 0x0000); // yellow
-  canvas->setTextSize(3);
-  canvas->setCursor(10, 10);
-  canvas->print("WEATHER");
+  dotText(canvas, "WEATHER", 10, 10, 3, 0xFFE0); // yellow, size 3
 
   // Get weather data
   String temp = WeatherManager::getTemperature();
@@ -110,35 +166,20 @@ void DisplayManager::drawWeatherScreen() {
   String wind = WeatherManager::getWindSpeed();
 
   // Temperature
-  canvas->setTextColor(0xFFFF, 0x0000); // white
-  canvas->setTextSize(2);
-  canvas->setCursor(10, 50);
-  canvas->print("Temp: ");
-  canvas->print(temp);
-  canvas->print(" C");
+  dotText(canvas, ("Temp: " + temp + " C").c_str(), 10, 50, 2, 0xFFFF); // white
 
   // Conditions
-  canvas->setCursor(10, 80);
-  canvas->print("Conditions:");
-  canvas->setCursor(10, 105);
-  canvas->setTextSize(2);
-  canvas->print(conditions);
+  dotText(canvas, "Conditions:", 10, 80, 2, 0xFFFF);
+  dotText(canvas, conditions.c_str(), 10, 105, 2, 0xFFFF);
 
   // Wind speed
-  canvas->setCursor(10, 135);
-  canvas->print("Wind: ");
-  canvas->print(wind);
-  canvas->print(" km/h");
+  dotText(canvas, ("Wind: " + wind + " km/h").c_str(), 10, 135, 2, 0xFFFF);
 
   // Location note
-  canvas->setTextColor(0x7BEF, 0x0000); // gray
-  canvas->setTextSize(1);
-  canvas->setCursor(10, 170);
-  canvas->print("Location: Copenhagen");
+  dotText(canvas, "Location: Copenhagen", 10, 170, 1, 0x7BEF); // gray
 
   // Update hint
-  canvas->setCursor(10, 185);
-  canvas->print("Updates every 60s");
+  dotText(canvas, "Updates every 60s", 10, 185, 1, 0x7BEF);
 
   pushToDisplay();
 }
@@ -150,26 +191,14 @@ void DisplayManager::drawAlarmsScreen() {
   canvas->fillScreen(0x0000);
 
   // Title
-  canvas->setTextColor(0xF81F, 0x0000); // magenta
-  canvas->setTextSize(3);
-  canvas->setCursor(10, 10);
-  canvas->print("ALARMS");
+  dotText(canvas, "ALARMS", 10, 10, 3, 0xF81F); // magenta, size 3
 
   // Alarm info
-  canvas->setTextColor(0xFFFF, 0x0000); // white
-  canvas->setTextSize(2);
-  canvas->setCursor(10, 50);
-  canvas->print("Alarm 1: --:--");
-
-  canvas->setCursor(10, 80);
-  canvas->print("Status: ");
-  canvas->print("Inactive");
+  dotText(canvas, "Alarm 1: --:--", 10, 50, 2, 0xFFFF); // white
+  dotText(canvas, "Status: Inactive", 10, 80, 2, 0xFFFF);
 
   // Note
-  canvas->setTextColor(0x7BEF, 0x0000); // gray
-  canvas->setTextSize(1);
-  canvas->setCursor(10, 120);
-  canvas->print("Use app to set alarms");
+  dotText(canvas, "Use app to set alarms", 10, 120, 1, 0x7BEF); // gray
 
   pushToDisplay();
 }
@@ -181,28 +210,19 @@ void DisplayManager::drawBatteryScreen() {
   canvas->fillScreen(0x0000);
 
   // Title
-  canvas->setTextColor(0x07E0, 0x0000); // green
-  canvas->setTextSize(3);
-  canvas->setCursor(10, 10);
-  canvas->print("BATTERY");
+  dotText(canvas, "BATTERY", 10, 10, 3, 0x07E0); // green, size 3
 
   // Get battery data
   float batVolt = BatteryManager::getVoltage();
   int batPct = BatteryManager::getPercentage();
 
   // Voltage
-  canvas->setTextColor(0xFFFF, 0x0000); // white
-  canvas->setTextSize(2);
-  canvas->setCursor(10, 50);
-  canvas->print("Voltage: ");
-  canvas->print(batVolt, 2);
-  canvas->print("V");
+  dotText(canvas, ("Voltage: " + String(batVolt, 2) + "V").c_str(), 10, 50, 2,
+          0xFFFF); // white
 
   // Percentage
-  canvas->setCursor(10, 80);
-  canvas->print("Charge: ");
-  canvas->print(batPct);
-  canvas->print("%");
+  dotText(canvas, ("Charge: " + String(batPct) + "%").c_str(), 10, 80, 2,
+          0xFFFF);
 
   // Large battery bar visualization
   int barWidth = map(batPct, 0, 100, 0, 200); // max 200 px width
@@ -227,10 +247,7 @@ void DisplayManager::drawBatteryScreen() {
   canvas->fillRect(barX, barY, barWidth, 30, barColor);
 
   // Status text
-  canvas->setTextColor(0x7BEF, 0x0000); // gray
-  canvas->setTextSize(1);
-  canvas->setCursor(10, 170);
-  canvas->print("GPIO15: Power enabled");
+  dotText(canvas, "GPIO15: Power enabled", 10, 170, 1, 0x7BEF); // gray
 
   pushToDisplay();
 }
@@ -242,52 +259,37 @@ void DisplayManager::drawBluetoothScreen() {
   canvas->fillScreen(0x0000);
 
   // Title
-  canvas->setTextColor(0x001F, 0x0000); // blue
-  canvas->setTextSize(3);
-  canvas->setCursor(10, 10);
-  canvas->print("BLUETOOTH");
+  dotText(canvas, "BLUETOOTH", 10, 10, 3, 0x001F); // blue, size 3
 
   // Connection status
   bool connected = BluetoothManager::isConnected();
 
-  canvas->setTextColor(0xFFFF, 0x0000); // white
-  canvas->setTextSize(2);
-  canvas->setCursor(10, 50);
-  canvas->print("Status: ");
-
+  // "Status: " in white, then the state word in green/red on the same line.
+  dotText(canvas, "Status: ", 10, 50, 2, 0xFFFF); // white
+  uint16_t stW, stH;
+  dotTextBounds("Status: ", 2, &stW, &stH);
   if (connected) {
-    canvas->setTextColor(0x07E0, 0x0000); // green
-    canvas->print("Connected");
+    dotText(canvas, "Connected", 10 + (int16_t)stW, 50, 2, 0x07E0); // green
   } else {
-    canvas->setTextColor(0xF800, 0x0000); // red
-    canvas->print("Disconnected");
+    dotText(canvas, "Disconnected", 10 + (int16_t)stW, 50, 2, 0xF800); // red
   }
 
   // Device Name
-  canvas->setTextColor(0xFFFF, 0x0000); // white
-  canvas->setCursor(10, 80);
-  canvas->print("Device: Lilygo_Watch");
+  dotText(canvas, "Device: Lilygo_Watch", 10, 80, 2, 0xFFFF); // white
 
   // Notifications
-  canvas->setCursor(10, 110);
-  canvas->print("Last Message:");
-
-  canvas->setTextSize(1);
-  canvas->setCursor(10, 140);
+  dotText(canvas, "Last Message:", 10, 110, 2, 0xFFFF);
   String note = BluetoothManager::getNotification();
   if (note.length() > 0) {
-    canvas->print(note);
+    dotText(canvas, note.c_str(), 10, 140, 1, 0xFFFF);
   } else {
-    canvas->print("No new messages");
+    dotText(canvas, "No new messages", 10, 140, 1, 0xFFFF);
   }
 
   // Instructions
   if (!connected) {
-    canvas->setTextColor(0x7BEF, 0x0000); // gray
-    canvas->setCursor(10, 170);
-    canvas->print("Pair with 'Lilygo_Watch'");
-    canvas->setCursor(10, 185);
-    canvas->print("Use Serial Bluetooth Terminal");
+    dotText(canvas, "Pair with 'Lilygo_Watch'", 10, 170, 1, 0x7BEF); // gray
+    dotText(canvas, "Use Serial Bluetooth Terminal", 10, 185, 1, 0x7BEF);
   }
 
   pushToDisplay();
@@ -320,14 +322,11 @@ void DisplayManager::drawWifiConnecting() {
   canvas->drawBitmap(iconX, iconY, ICON_WIFI_48, 48, 48, iconColor);
 
   // "Connecting..." text below
-  canvas->setTextColor(0x7BEF, 0x0000); // gray
-  canvas->setTextSize(2);
   const char *msg = "Connecting...";
-  int16_t x1, y1;
   uint16_t w, h;
-  canvas->getTextBounds(msg, 0, 0, &x1, &y1, &w, &h);
-  canvas->setCursor((canvas->width() - w) / 2 - x1, iconY + 48 + 10);
-  canvas->print(msg);
+  dotTextBounds(msg, 2, &w, &h);
+  dotText(canvas, msg, (canvas->width() - w) / 2, iconY + 48 + 10, 2,
+          0x7BEF); // gray
 
   pushToDisplay();
 }
@@ -366,41 +365,29 @@ void DisplayManager::drawStopwatch() {
     statusColor = 0x07FF; // cyan
   }
 
-  canvas->setTextSize(2);
-  canvas->setTextColor(statusColor, 0x0000);
-  int16_t x1, y1;
   uint16_t w, h;
-  canvas->getTextBounds(status, 0, 0, &x1, &y1, &w, &h);
-  canvas->setCursor((canvas->width() - w) / 2 - x1, 12);
-  canvas->print(status);
+  dotTextBounds(status, 2, &w, &h);
+  dotText(canvas, status, (canvas->width() - w) / 2, 12, 2, statusColor);
 
   // ----- Big elapsed time (centered, textSize 8) -----
   String timeStr = formatSw(StopwatchManager::getElapsedMs());
-  canvas->setTextColor(0xFFFF, 0x0000); // white
-  canvas->setTextSize(8);
-  canvas->getTextBounds(timeStr, 0, 0, &x1, &y1, &w, &h);
-  canvas->setCursor((canvas->width() - w) / 2 - x1,
-                    (canvas->height() - h) / 2 - y1);
-  canvas->print(timeStr);
+  dotTextBounds(timeStr.c_str(), 8, &w, &h);
+  dotText(canvas, timeStr.c_str(), (canvas->width() - w) / 2,
+          (canvas->height() - h) / 2, 8, 0xFFFF); // white
 
   // ----- Lap line (below time) or controls hint -----
   uint8_t laps = StopwatchManager::getLapCount();
   if (laps > 0) {
     String lapStr = "LAP " + String(laps) + ": " + formatSw(StopwatchManager::getLastLapMs());
-    canvas->setTextSize(2);
-    canvas->setTextColor(0xFFE0, 0x0000); // yellow
-    canvas->getTextBounds(lapStr, 0, 0, &x1, &y1, &w, &h);
-    canvas->setCursor((canvas->width() - w) / 2 - x1, 170);
-    canvas->print(lapStr);
+    dotTextBounds(lapStr.c_str(), 2, &w, &h);
+    dotText(canvas, lapStr.c_str(), (canvas->width() - w) / 2, 170, 2,
+            0xFFE0); // yellow
   }
 
   // Controls hint (bottom, tiny gray)
   const char *hint = "TOP:START/STOP  BOT:LAP/RST";
-  canvas->setTextSize(1);
-  canvas->setTextColor(0x7BEF, 0x0000); // gray
-  canvas->getTextBounds(hint, 0, 0, &x1, &y1, &w, &h);
-  canvas->setCursor((canvas->width() - w) / 2 - x1, 222);
-  canvas->print(hint);
+  dotTextBounds(hint, 1, &w, &h);
+  dotText(canvas, hint, (canvas->width() - w) / 2, 222, 1, 0x7BEF); // gray
 
   pushToDisplay();
 }
@@ -437,14 +424,10 @@ static void drawMenuItem(GFXcanvas16 *c, int16_t cx, int16_t cy, int16_t r,
   uint8_t  textSize = isSelected ? 6 : (isFar ? 2 : 4);
   uint16_t textCol  = lerp565(0x4208, 0xFFFF, closeness);  // very dark gray -> white
 
-  c->setTextSize(textSize);
-  c->setTextColor(textCol, 0x0000);
-
-  int16_t x1, y1;
   uint16_t w, h;
-  c->getTextBounds(label, 0, 0, &x1, &y1, &w, &h);
-  int16_t tx = ax - x1;       // left-anchored at arc point, extends toward outer edge
-  int16_t ty = ay - h / 2 - y1;
+  dotTextBounds(label.c_str(), textSize, &w, &h);
+  int16_t tx = ax;            // left-anchored at arc point, extends toward outer edge
+  int16_t ty = ay - (int16_t)h / 2;
 
   if (isFar) {
     // ponytail: fake blur — draw 3 copies at 1px offsets in a dimmer color.
@@ -452,13 +435,11 @@ static void drawMenuItem(GFXcanvas16 *c, int16_t cx, int16_t cy, int16_t r,
     // Icons skipped on far tier — bitmaps don't fake-blur, and they'd read as
     // a hard dot next to soft text.
     uint16_t blurCol = lerp565(0x2104, 0x4208, closeness * 4.0f);  // very dim
-    c->setTextColor(blurCol, 0x0000);
-    c->setCursor(tx,     ty);     c->print(label);
-    c->setCursor(tx + 1, ty);     c->print(label);
-    c->setCursor(tx,     ty + 1); c->print(label);
+    dotText(c, label.c_str(), tx,     ty,     textSize, blurCol);
+    dotText(c, label.c_str(), tx + 1, ty,     textSize, blurCol);
+    dotText(c, label.c_str(), tx,     ty + 1, textSize, blurCol);
   } else {
-    c->setCursor(tx, ty);
-    c->print(label);
+    dotText(c, label.c_str(), tx, ty, textSize, textCol);
 
     // Icon to the right of the text. Size matches the text tier:
     //   selected (size 6, 48px tall) -> 48x48 icon
