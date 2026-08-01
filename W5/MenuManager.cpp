@@ -1,4 +1,5 @@
 #include "MenuManager.h"
+#include "StopwatchManager.h"
 
 // ponytail: items live here as the single source of truth. DisplayManager queries
 // menuItemLabel(), the select handler maps index -> mode below. Keep both in sync.
@@ -80,6 +81,13 @@ void MenuManager::handleEvent(ButtonEvent evt) {
     }
     _dirty = true;
     Serial.printf("MENU: mode -> %d\n", (int)_mode);
+    return;
+  }
+
+  // Stopwatch handles its own button events (start/stop/lap/reset);
+  // BOTH_LONG_PRESS already exited to menu above.
+  if (_mode == MODE_STOPWATCH) {
+    StopwatchManager::handleEvent(evt);
     return;
   }
 

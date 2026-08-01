@@ -3,6 +3,7 @@
 #include "BluetoothManager.h"
 #include "RM67162Display.h"
 #include "MenuManager.h"
+#include "StopwatchManager.h"
 #include "WeatherManager.h"
 #include "icons.h" // 1-bit PROGMEM menu icons (generated from icons/*.png)
 #include "rm67162.h" // For lcd_PushColors
@@ -317,6 +318,79 @@ void DisplayManager::drawWifiConnecting() {
   canvas->getTextBounds(msg, 0, 0, &x1, &y1, &w, &h);
   canvas->setCursor((canvas->width() - w) / 2 - x1, iconY + 48 + 10);
   canvas->print(msg);
+
+  pushToDisplay();
+}
+
+// ponytail: MM:SS.CC from milliseconds. Caps at 99 minutes; a wrist stopwatch
+// session rarely exceeds that. Ceiling: rolls over at 100 min. Upgrade: hours.
+static String formatSw(uint32_t ms) {
+  uint32_t totalCs = ms / 10;
+  uint32_t s = totalCs / 100;
+  uint32_t m = s / 60;
+  uint32_t cs = totalCs % 100;
+  s = s % 60;
+  m = m % 100;
+  char buf[12];
+  snprintf(buf, sizeof(buf), "%02u:%02u.%02u", (unsigned)m, (unsigned)s, (unsigned)cs);
+  return String(buf);
+}
+
+void DisplayManager::drawStopwatch() {
+  if (!canvas)
+    return;
+
+  canvas->fillScreen(0x0000);
+
+  // ----- Status label (top, centered) -----
+  const char *status;
+  uint16_t statusColor;
+  if (StopwatchManager::isRunning()) {
+    status = "RUNNING";
+    statusColor = 0x07E0; // green
+  } else if (StopwatchManager::isStopped()) {
+    status = "STOPPED";
+    statusColor = 0xF800; // red
+  } else {
+    status = "READY";
+    statusColor = 0x07FF; // cyan
+  }
+
+  canvas->setTextSize(2);
+  canvas->setTextColor(statusColor, 0x0000);
+  int16_t x1, y1;
+  uint16_t w, h;
+  canvas->getTextBounds(status, 0, 0, &x1, &y1, &w, &h);
+  canvas->setCursor((canvas->width() - w) / 2 - x1, 12);
+  canvas->print(status);
+
+  // ----- Big elapsed time (centered, textSize 8) -----
+  String timeStr = formatSw(StopwatchManager::getElapsedMs());
+  canvas->setTextColor(0xFFFF, 0x0000); // white
+  canvas->setTextSize(8);
+  canvas->getTextBounds(timeStr, 0, 0, &x1, &y1, &w, &h);
+  canvas->setCursor((canvas->width() - w) / 2 - x1,
+                    (canvas->height() - h) / 2 - y1);
+  canvas->print(timeStr);
+
+  // ----- Lap line (below time) or controls hint -----
+  uint8_t laps = StopwatchManager::getLapCount();
+  if (laps > 0) {
+    String lapStr = "LAP " + String(laps) + ": " + formatSw(StopwatchManager::getLastLapMs());
+    canvas->setTextSize(2);
+    canvas->setTextColor(0xFFE0, 0x0000); // yellow
+    canvas->getTextBounds(lapStr, 0, 0, &x1, &y1, &w, &h);
+    canvas->setCursor((canvas->width() - w) / 2 - x1, 170);
+    canvas->print(lapStr);
+  }
+
+  // Controls hint (bottom, tiny gray)
+  const char *hint = "TOP:START  BOT:STOP/RST  DBL:LAP";
+  canvas->setTextSize(1);
+  canvas->setTextColor(0x7BEF, 0x0000); // gray
+  canvas->getTextBounds(hint, 0, 0, &x1, &y1, &w, &h);
+  canvas->setCursor((canvas->width() - w) / 2 - x1, 222);
+  canvas->print(hint);
 
   pushToDisplay();
 }

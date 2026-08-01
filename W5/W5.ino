@@ -7,6 +7,7 @@
 #include "ButtonManager.h"
 #include "DisplayManager.h"
 #include "MenuManager.h"
+#include "StopwatchManager.h"
 #include "TimeManager.h"
 #include "WeatherManager.h"
 
@@ -15,9 +16,15 @@
 // Throttle to 10 min — open-meteo fair-use is roughly once per ~10 min.
 static const uint32_t WATCH_REDRAW_MS  = 1000;
 static const uint32_t WEATHER_FETCH_MS = 600000;
+// ponytail: centiseconds need >1Hz to feel alive, but full framebuffer push
+// (~257KB @ 75MHz SPI ≈ 27ms) rules out 100Hz. 20Hz (50ms) reads as a live
+// stopwatch without saturating SPI. Ceiling: cs digit jumps ~5/frame; value is
+// always exact since elapsed is computed from millis() at draw time.
+static const uint32_t STOPWATCH_REDRAW_MS = 50;
 
 static uint32_t lastWatchRedraw = 0;
 static uint32_t lastWeatherFetch = 0;
+static uint32_t lastStopwatchRedraw = 0;
 
 void setup() {
   // ===== CRITICAL: ENABLE POWER FIRST - BEFORE ANYTHING ELSE =====
@@ -54,6 +61,7 @@ void setup() {
   BluetoothManager::initBluetooth();
   ButtonManager::init();
   MenuManager::init();
+  StopwatchManager::init();
   Serial.println("Ready");
 }
 
@@ -94,12 +102,17 @@ void loop() {
         DisplayManager::drawMenu(MenuManager::selectedIndex());
       }
       break;
-    case MODE_STOPWATCH:
-      if (MenuManager::consumeDirty()) {
-        DisplayManager::clearDisplay();
-        DisplayManager::drawText("Stopwatch (TODO)", 10, 30);
+    case MODE_STOPWATCH: {
+      // Redraw on mode entry / state change, or at 20Hz while running so the
+      // centiseconds tick. Idle/stopped screens are static (no periodic redraw).
+      bool force = MenuManager::consumeDirty() || StopwatchManager::consumeDirty();
+      if (force || (StopwatchManager::isRunning() &&
+                    now - lastStopwatchRedraw >= STOPWATCH_REDRAW_MS)) {
+        DisplayManager::drawStopwatch();
+        lastStopwatchRedraw = now;
       }
       break;
+    }
     case MODE_CONFIG:
       if (MenuManager::consumeDirty()) {
         DisplayManager::clearDisplay();
