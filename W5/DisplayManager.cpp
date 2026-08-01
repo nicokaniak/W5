@@ -4,6 +4,7 @@
 #include "RM67162Display.h"
 #include "MenuManager.h"
 #include "StopwatchManager.h"
+#include "TimeManager.h"
 #include "WeatherManager.h"
 #include "icons.h" // 1-bit PROGMEM menu icons (generated from icons/*.png)
 #include "rm67162.h" // For lcd_PushColors
@@ -67,6 +68,15 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
   int16_t y = (canvas->height() - h) / 2 - y1;
   canvas->setCursor(x, y);
   canvas->print(timeStr);
+
+  // ----- Date (top-left, small) -----
+  String dateStr = TimeManager::getCurrentDate();
+  if (dateStr.length()) {
+    canvas->setTextColor(0x07FF, 0x0000); // cyan, same as time
+    canvas->setTextSize(4);
+    canvas->setCursor(8, 8);
+    canvas->print(dateStr);
+  }
 
   // ----- Battery bar (bottom-right) -----
   int batPct = BatteryManager::getPercentage();

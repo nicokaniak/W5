@@ -7,6 +7,7 @@
 #include <time.h>
 
 static String currentTime = "00:00:00";
+static String currentDate = "";
 
 // IANA timezone name → POSIX TZ string. Covers major world zones.
 // Falls back to TIMEZONE from pins_config.h if the API-fetched zone isn't here.
@@ -162,9 +163,14 @@ void TimeManager::updateTime() {
   char timeStringBuff[50];
   strftime(timeStringBuff, sizeof(timeStringBuff), "%H:%M:%S", &timeinfo);
   currentTime = String(timeStringBuff);
+
+  char dateStringBuff[50];
+  strftime(dateStringBuff, sizeof(dateStringBuff), "%a %d/%m", &timeinfo);
+  currentDate = String(dateStringBuff);
 }
 
 String TimeManager::getCurrentTime() { return currentTime; }
+String TimeManager::getCurrentDate() { return currentDate; }
 
 void TimeManager::drawWatchFace(const String &timeStr) {
   DisplayManager::clearDisplay();
