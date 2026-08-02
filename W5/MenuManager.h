@@ -8,6 +8,7 @@ enum AppMode {
   MODE_WATCH,
   MODE_MENU,
   MODE_STOPWATCH,
+  MODE_WEATHER,
   MODE_CONFIG,
 };
 

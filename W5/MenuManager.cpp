@@ -12,8 +12,8 @@ static WiFiManager wifiManager;
 
 // ponytail: items live here as the single source of truth. DisplayManager queries
 // menuItemLabel(), the select handler maps index -> mode below. Keep both in sync.
-static const char* MENU_ITEMS[] = { "Watch", "Stopwatch", "Config" };
-static const uint8_t NUM_ITEMS = 3;
+static const char* MENU_ITEMS[] = { "Watch", "Stopwatch", "Weather", "Config" };
+static const uint8_t NUM_ITEMS = 4;
 
 // ponytail: config sub-menu. Currently one item; the UI and handler are sized for
 // a small vertical list, but adding items only requires extending this array.
@@ -163,7 +163,8 @@ void MenuManager::handleEvent(ButtonEvent evt) {
       switch (_selectedIndex) {
         case 0:  _mode = MODE_WATCH;     break;
         case 1:  _mode = MODE_STOPWATCH; break;
-        case 2:  _mode = MODE_CONFIG;    break;
+        case 2:  _mode = MODE_WEATHER;   break;
+        case 3:  _mode = MODE_CONFIG;    break;
         default: _mode = MODE_WATCH;     break;
       }
       _dirty = true;

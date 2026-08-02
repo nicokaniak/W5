@@ -7,6 +7,7 @@
 #include "TimeManager.h"
 #include "WeatherManager.h"
 #include "icons.h" // 1-bit PROGMEM menu icons (generated from icons/*.png)
+#include "weather_icons.h" // 1-bit PROGMEM weather icons (generated from icons/weather/*.png)
 #include "rm67162.h" // For lcd_PushColors
 #include <math.h>
 
@@ -157,29 +158,143 @@ void DisplayManager::drawWeatherScreen() {
 
   canvas->fillScreen(0x0000);
 
-  // Title
+  // Display is 240 wide x 536 tall (portrait).
+  // Layout:
+  //   0-60:   Title + current weather icon
+  //   60-100: Current temp text
+  //  100-380: Graph area (temperature line + precipitation fill)
+  //  380-420: Hour labels under graph
+  //  420-536: Legend + location
+
+  // --- Title ---
   dotText(canvas, "WEATHER", 10, 10, 3, 0xFFE0); // yellow, size 3
 
-  // Get weather data
-  String temp = WeatherManager::getTemperature();
-  String conditions = WeatherManager::getWeatherDescription();
-  String wind = WeatherManager::getWindSpeed();
+  if (!WeatherManager::hasHourlyData()) {
+    dotText(canvas, "Fetching forecast...", 10, 60, 2, 0x7BEF);
+    dotText(canvas, "Updates every 10 min", 10, 90, 1, 0x7BEF);
+    pushToDisplay();
+    return;
+  }
 
-  // Temperature
-  dotText(canvas, ("Temp: " + temp + " C").c_str(), 10, 50, 2, 0xFFFF); // white
+  const HourlyForecast &fc = WeatherManager::getHourlyForecast();
+  uint8_t n = fc.count;
+  if (n == 0) {
+    dotText(canvas, "No data", 10, 60, 2, 0xF800);
+    pushToDisplay();
+    return;
+  }
 
-  // Conditions
-  dotText(canvas, "Conditions:", 10, 80, 2, 0xFFFF);
-  dotText(canvas, conditions.c_str(), 10, 105, 2, 0xFFFF);
+  // --- Current weather icon (top-right) ---
+  uint8_t iw = 0, ih = 0;
+  const unsigned char *icon = weatherIconBitmap(fc.weatherCode[0], &iw, &ih);
+  if (icon) {
+    canvas->drawBitmap(canvas->width() - iw - 10, 5, icon, iw, ih, 0xFFFF);
+  }
 
-  // Wind speed
-  dotText(canvas, ("Wind: " + wind + " km/h").c_str(), 10, 135, 2, 0xFFFF);
+  // --- Current temperature text ---
+  String currTemp = String((int)round(fc.temperature[0]));
+  dotText(canvas, (currTemp + "C").c_str(), 10, 45, 3, 0xFFFF); // white, size 3
 
-  // Location note
-  dotText(canvas, "Location: Copenhagen", 10, 170, 1, 0x7BEF); // gray
+  // --- Graph area ---
+  // ponytail: graph spans the full 240px width with small margins.
+  // Temperature is a red line, precipitation is a light-blue filled area.
+  // Both share the same x-axis (hours). Y-axes are independent.
+  const int16_t graphX = 10;
+  const int16_t graphW = canvas->width() - 20;  // 220px
+  const int16_t graphY = 100;
+  const int16_t graphH = 260;
+  const int16_t graphBottom = graphY + graphH;  // 360
 
-  // Update hint
-  dotText(canvas, "Updates every 60s", 10, 185, 1, 0x7BEF);
+  // Find min/max for temperature scaling
+  float tempMin = fc.temperature[0], tempMax = fc.temperature[0];
+  float precipMax = 0.0f;
+  for (uint8_t i = 0; i < n; i++) {
+    if (fc.temperature[i] < tempMin) tempMin = fc.temperature[i];
+    if (fc.temperature[i] > tempMax) tempMax = fc.temperature[i];
+    if (fc.precipitation[i] > precipMax) precipMax = fc.precipitation[i];
+  }
+  // Pad temp range so the line doesn't touch the edges
+  if (tempMax - tempMin < 2.0f) { tempMin -= 1.0f; tempMax += 1.0f; }
+  tempMin -= 1.0f;
+  tempMax += 1.0f;
+  if (precipMax < 0.1f) precipMax = 1.0f; // avoid div-by-zero, show flat baseline
+
+  // --- Precipitation area (light blue fill) ---
+  // ponytail: filled area chart using vertical strips per data point.
+  // RGB565 light blue: 0x4B5F (approx #29B5FE)
+  const uint16_t PRECIP_COLOR = 0x4B5F;
+  const uint16_t PRECIP_ALPHA  = 0x39FF; // dimmer for overlap visibility
+
+  for (uint8_t i = 0; i < n; i++) {
+    int16_t x = graphX + (int16_t)(graphW * i) / (n - 1);
+    int16_t xNext = (i + 1 < n) ? graphX + (int16_t)(graphW * (i + 1)) / (n - 1) : x + 1;
+
+    float precipH = (fc.precipitation[i] / precipMax) * (graphH * 0.5f);
+    int16_t barH = (int16_t)precipH;
+
+    // Draw filled bar from bottom up
+    if (barH > 0) {
+      canvas->fillRect(x, graphBottom - barH, xNext - x, barH, PRECIP_COLOR);
+    }
+  }
+
+  // --- Temperature line (red) ---
+  // ponytail: connected line graph. RGB565 red: 0xF800
+  const uint16_t TEMP_COLOR = 0xF800;
+
+  auto tempY = [&](float t) -> int16_t {
+    float frac = (t - tempMin) / (tempMax - tempMin);
+    return graphBottom - (int16_t)(frac * graphH);
+  };
+
+  for (uint8_t i = 1; i < n; i++) {
+    int16_t x0 = graphX + (int16_t)(graphW * (i - 1)) / (n - 1);
+    int16_t y0 = tempY(fc.temperature[i - 1]);
+    int16_t x1 = graphX + (int16_t)(graphW * i) / (n - 1);
+    int16_t y1 = tempY(fc.temperature[i]);
+    canvas->drawLine(x0, y0, x1, y1, TEMP_COLOR);
+  }
+
+  // Draw data points as small circles
+  for (uint8_t i = 0; i < n; i++) {
+    int16_t x = graphX + (int16_t)(graphW * i) / (n - 1);
+    int16_t y = tempY(fc.temperature[i]);
+    canvas->fillCircle(x, y, 2, TEMP_COLOR);
+  }
+
+  // --- Graph border ---
+  canvas->drawRect(graphX, graphY, graphW, graphH, 0x4208); // dark gray border
+
+  // --- Hour labels under graph ---
+  // ponytail: show every 3rd hour to fit 240px width. Size 1 dot text.
+  const int16_t labelY = graphBottom + 5;
+  for (uint8_t i = 0; i < n; i += 3) {
+    int16_t x = graphX + (int16_t)(graphW * i) / (n - 1);
+    char buf[8];
+    snprintf(buf, sizeof(buf), "%02d", fc.hour[i]);
+    // Center the 2-char label on the data point
+    dotText(canvas, buf, x - 6, labelY, 1, 0x7BEF); // gray, size 1
+  }
+
+  // --- Legend ---
+  const int16_t legendY = labelY + 20;
+  // Precipitation swatch
+  canvas->fillRect(10, legendY, 12, 12, PRECIP_COLOR);
+  dotText(canvas, "Rain", 28, legendY - 2, 1, 0x7BEF);
+
+  // Temperature swatch (line)
+  canvas->drawLine(90, legendY + 6, 102, legendY + 6, TEMP_COLOR);
+  canvas->fillCircle(96, legendY + 6, 2, TEMP_COLOR);
+  dotText(canvas, "Temp", 108, legendY - 2, 1, 0x7BEF);
+
+  // --- Min/Max temp labels ---
+  String minStr = String((int)round(tempMin + 1)); // undo the pad
+  String maxStr = String((int)round(tempMax - 1));
+  dotText(canvas, ("Lo " + minStr + "C").c_str(), 10, legendY + 20, 1, 0x7BEF);
+  dotText(canvas, ("Hi " + maxStr + "C").c_str(), 90, legendY + 20, 1, 0x7BEF);
+
+  // --- Location ---
+  dotText(canvas, "Copenhagen", 10, legendY + 40, 1, 0x7BEF);
 
   pushToDisplay();
 }
@@ -362,7 +477,7 @@ void DisplayManager::drawConfigMenu(uint8_t selectedIndex) {
     // Icon for the Wi-Fi setup item; uses the same Wi-Fi bitmaps as the status screen.
     if (i == 0) {
       uint8_t iw = 0, ih = 0;
-      const unsigned char* bm = menuIconBitmap(3, sel ? 48 : 32, &iw, &ih);
+      const unsigned char* bm = menuIconBitmap(4, sel ? 48 : 32, &iw, &ih);
       if (bm) {
         int16_t ix = canvas->width() - iw - 10;
         int16_t iy = y + (itemH - ih) / 2;

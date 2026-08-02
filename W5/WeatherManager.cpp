@@ -3,11 +3,17 @@
 #include "DisplayManager.h"
 #include <HTTPClient.h>
 #include <WiFi.h>
+#include <time.h>
 
 static String weatherInfo = "No data";
 static String temperature = "--";
 static String windSpeed = "--";
 static String weatherDescription = "Unknown";
+
+static HourlyForecast hourlyForecast;
+static bool hourlyValid = false;
+
+static void fetchHourlyForecast();
 
 // Convert weather code to description
 String getWeatherCodeDescription(int code) {
@@ -189,6 +195,144 @@ void WeatherManager::updateWeather() {
     windSpeed = "No WiFi";
     weatherDescription = "No WiFi";
   }
+
+  fetchHourlyForecast();
+}
+
+// ponytail: manual JSON extraction — no ArduinoJson dependency. Finds array
+// values by key name, parses floats/ints. Ceiling: if open-meteo changes their
+// JSON structure, this breaks. Upgrade path: ArduinoJson.
+static float extractFloat(const String &payload, const char *key, int idx) {
+  String searchKey = String("\"") + key + "\":[";
+  int arrStart = payload.indexOf(searchKey);
+  if (arrStart < 0) return 0.0f;
+  arrStart += searchKey.length();
+
+  int pos = arrStart;
+  for (int i = 0; i < idx; i++) {
+    int comma = payload.indexOf(',', pos);
+    if (comma < 0) return 0.0f;
+    pos = comma + 1;
+  }
+
+  int end = payload.indexOf(',', pos);
+  if (end < 0) end = payload.indexOf(']', pos);
+  if (end < 0) return 0.0f;
+  return payload.substring(pos, end).toFloat();
+}
+
+static int extractInt(const String &payload, const char *key, int idx) {
+  return (int)extractFloat(payload, key, idx);
+}
+
+static void fetchHourlyForecast() {
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  HTTPClient http;
+  // ponytail: hourly forecast — temperature_2m, precipitation, weathercode for next 24h.
+  // forecast_hours=24 limits the response size. &past_days=0 starts from current hour.
+  String apiUrl =
+      "https://api.open-meteo.com/v1/forecast?latitude=" + String(LATITUDE) +
+      "&longitude=" + String(LONGITUDE) +
+      "&hourly=temperature_2m,precipitation,weathercode&forecast_days=2&timezone=auto";
+  http.begin(apiUrl);
+  http.setTimeout(8000);
+  int httpCode = http.GET();
+
+  if (httpCode != 200) {
+    Serial.printf("Hourly forecast HTTP error: %d\n", httpCode);
+    http.end();
+    return;
+  }
+
+  String payload = http.getString();
+  http.end();
+
+  // Find the current hour offset by matching against local time.
+  // open-meteo returns ISO timestamps like "2024-01-15T14:00".
+  // We find the first entry whose hour matches the current local hour.
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo, 1000)) {
+    Serial.println("Hourly: no NTP time, using index 0");
+    timeinfo.tm_hour = -1; // fallback: start from beginning
+  }
+
+  // Parse the time array to find the starting index matching current hour.
+  String timeKey = "\"time\":[";
+  int timeStart = payload.indexOf(timeKey);
+  if (timeStart < 0) {
+    Serial.println("Hourly: time array not found");
+    return;
+  }
+  timeStart += timeKey.length();
+
+  // Find the first timestamp that matches or is after current hour.
+  int startIndex = 0;
+  int pos = timeStart;
+  for (int i = 0; i < 48; i++) {
+    int quote1 = payload.indexOf('"', pos);
+    int quote2 = payload.indexOf('"', quote1 + 1);
+    if (quote1 < 0 || quote2 < 0) break;
+
+    String ts = payload.substring(quote1 + 1, quote2);
+    // Extract hour from "YYYY-MM-DDTHH:00"
+    int tIdx = ts.indexOf('T');
+    if (tIdx >= 0 && tIdx + 3 < (int)ts.length()) {
+      int tsHour = ts.substring(tIdx + 1, tIdx + 3).toInt();
+      if (tsHour == timeinfo.tm_hour || timeinfo.tm_hour < 0) {
+        startIndex = i;
+        break;
+      }
+    }
+    pos = quote2 + 1;
+    int comma = payload.indexOf(',', pos);
+    if (comma < 0) break;
+    pos = comma + 1;
+  }
+
+  // Extract 24 hours starting from startIndex.
+  uint8_t count = 0;
+  for (int i = 0; i < HOURLY_FORECAST_HOURS; i++) {
+    int dataIdx = startIndex + i;
+    float temp = extractFloat(payload, "temperature_2m", dataIdx);
+    float precip = extractFloat(payload, "precipitation", dataIdx);
+    int wcode = extractInt(payload, "weathercode", dataIdx);
+
+    // Parse hour from timestamp for this entry.
+    int hour = 0;
+    pos = timeStart;
+    bool found = false;
+    for (int j = 0; j <= dataIdx; j++) {
+      int q1 = payload.indexOf('"', pos);
+      int q2 = payload.indexOf('"', q1 + 1);
+      if (q1 < 0 || q2 < 0) break;
+      if (j == dataIdx) {
+        String ts = payload.substring(q1 + 1, q2);
+        int tIdx = ts.indexOf('T');
+        if (tIdx >= 0 && tIdx + 3 < (int)ts.length())
+          hour = ts.substring(tIdx + 1, tIdx + 3).toInt();
+        found = true;
+        break;
+      }
+      pos = q2 + 1;
+      int comma = payload.indexOf(',', pos);
+      if (comma < 0) break;
+      pos = comma + 1;
+    }
+
+    if (!found) break;
+
+    hourlyForecast.hour[count] = hour;
+    hourlyForecast.temperature[count] = temp;
+    hourlyForecast.precipitation[count] = precip;
+    hourlyForecast.weatherCode[count] = wcode;
+    count++;
+  }
+
+  hourlyForecast.count = count;
+  hourlyValid = count > 0;
+  Serial.printf("Hourly forecast: %d entries starting at hour %d\n",
+                count, count > 0 ? hourlyForecast.hour[0] : -1);
 }
 
 String WeatherManager::getWeatherInfo() { return weatherInfo; }
@@ -198,3 +342,7 @@ String WeatherManager::getTemperature() { return temperature; }
 String WeatherManager::getWindSpeed() { return windSpeed; }
 
 String WeatherManager::getWeatherDescription() { return weatherDescription; }
+
+const HourlyForecast& WeatherManager::getHourlyForecast() { return hourlyForecast; }
+
+bool WeatherManager::hasHourlyData() { return hourlyValid; }

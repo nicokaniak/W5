@@ -113,6 +113,19 @@ void loop() {
       }
       break;
     }
+    case MODE_WEATHER: {
+      bool force = MenuManager::consumeDirty();
+      // Refresh weather data every 10 min even while viewing the screen
+      if (now - lastWeatherFetch >= WEATHER_FETCH_MS) {
+        WeatherManager::updateWeather();
+        lastWeatherFetch = now;
+        force = true;
+      }
+      if (force) {
+        DisplayManager::drawWeatherScreen();
+      }
+      break;
+    }
     case MODE_CONFIG:
       if (MenuManager::consumeDirty()) {
         DisplayManager::drawConfigMenu(MenuManager::configSelectedIndex());
