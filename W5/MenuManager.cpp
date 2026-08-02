@@ -4,16 +4,11 @@
 #include "TimeManager.h"
 #include "WeatherManager.h"
 #include <WiFi.h>
-
-// ponytail: WiFiManager is an optional library; guard it so the sketch still builds
-// if it isn't installed, but the menu item will report that it is missing.
-#if __has_include(<WiFiManager.h>)
 #include <WiFiManager.h>
-#define HAS_WIFIMANAGER 1
+
+// ponytail: WiFiManager must be installed for on-device Wi-Fi setup. In Arduino IDE
+// use the Library Manager; in PlatformIO add tzapu/WiFiManager to lib_deps.
 static WiFiManager wifiManager;
-#else
-#define HAS_WIFIMANAGER 0
-#endif
 
 // ponytail: items live here as the single source of truth. DisplayManager queries
 // menuItemLabel(), the select handler maps index -> mode below. Keep both in sync.
@@ -179,7 +174,6 @@ void MenuManager::handleEvent(ButtonEvent evt) {
 }
 
 void MenuManager::runWifiPortal() {
-#if HAS_WIFIMANAGER
   // ponytail: blocking portal is the smallest implementation. The device becomes an
   // AP named "W5-Setup" and blocks here until the user submits credentials or the
   // portal times out. Buttons are not polled while the portal is open.
@@ -205,10 +199,6 @@ void MenuManager::runWifiPortal() {
     DisplayManager::drawWifiResultScreen(false, "Setup cancelled / timeout");
     delay(3000);
   }
-#else
-  DisplayManager::drawWifiResultScreen(false, "WiFiManager not installed");
-  delay(3000);
-#endif
 
   _mode = MODE_WATCH;
   _dirty = true;
