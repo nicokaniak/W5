@@ -57,6 +57,12 @@ void setup() {
   WeatherManager::initWeather();
 
   TimeManager::initTime();
+
+  // ponytail: fetch weather immediately at boot so the first weather-screen open
+  // has data; otherwise the user waits up to 10 min for the periodic refresh.
+  WeatherManager::updateWeather();
+  lastWeatherFetch = millis();
+
   AlarmManager::initAlarms();
   BluetoothManager::initBluetooth();
   ButtonManager::init();
