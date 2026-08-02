@@ -331,6 +331,117 @@ void DisplayManager::drawWifiConnecting() {
   pushToDisplay();
 }
 
+void DisplayManager::drawConfigMenu(uint8_t selectedIndex) {
+  if (!canvas)
+    return;
+
+  canvas->fillScreen(0x0000);
+
+  // Title
+  dotText(canvas, "CONFIG", 10, 10, 3, 0xFFE0); // yellow
+
+  const uint8_t count = MenuManager::configItemCount();
+  // ponytail: hard-coded vertical list spacing. Works for the current 1–3 items;
+  // beyond that the list overflows the 240px height and needs scrolling.
+  const int16_t startY = 80;
+  const int16_t itemH  = 55;
+
+  for (uint8_t i = 0; i < count; i++) {
+    int16_t y = startY + i * itemH;
+    const char* label = MenuManager::configItemLabel(i);
+    bool sel = (i == selectedIndex);
+    uint16_t col = sel ? 0x07FF : 0x7BEF;
+    uint16_t bulletCol = sel ? 0x07FF : 0x4208;
+
+    // Bullet
+    canvas->fillCircle(15, y + 12, 5, bulletCol);
+
+    // Label
+    dotText(canvas, label, 35, y, 3, col);
+
+    // Icon for the Wi-Fi setup item; uses the same Wi-Fi bitmaps as the status screen.
+    if (i == 0) {
+      uint8_t iw = 0, ih = 0;
+      const unsigned char* bm = menuIconBitmap(3, sel ? 48 : 32, &iw, &ih);
+      if (bm) {
+        int16_t ix = canvas->width() - iw - 10;
+        int16_t iy = y + (itemH - ih) / 2;
+        canvas->drawBitmap(ix, iy, bm, iw, ih, col);
+      }
+    }
+  }
+
+  pushToDisplay();
+}
+
+void DisplayManager::drawWifiPortalScreen() {
+  if (!canvas)
+    return;
+
+  canvas->fillScreen(0x0000);
+
+  // Title
+  const char* title = "WIFI SETUP";
+  uint16_t w, h;
+  dotTextBounds(title, 3, &w, &h);
+  dotText(canvas, title, (canvas->width() - w) / 2, 15, 3, 0x07FF); // cyan
+
+  // Wi-Fi icon
+  int16_t iconX = (canvas->width() - 48) / 2;
+  int16_t iconY = 70;
+  canvas->drawBitmap(iconX, iconY, ICON_WIFI_48, 48, 48, 0x07FF);
+
+  // Instructions
+  const char* line1 = "Connect to: W5-Setup";
+  const char* line2 = "Open 192.168.4.1";
+  const char* line3 = "Enter Wi-Fi details";
+
+  dotTextBounds(line1, 2, &w, &h);
+  dotText(canvas, line1, (canvas->width() - w) / 2, iconY + 48 + 20, 2, 0xFFFF);
+  dotTextBounds(line2, 2, &w, &h);
+  dotText(canvas, line2, (canvas->width() - w) / 2, iconY + 48 + 45, 2, 0xFFFF);
+  dotTextBounds(line3, 2, &w, &h);
+  dotText(canvas, line3, (canvas->width() - w) / 2, iconY + 48 + 70, 2, 0x7BEF);
+
+  pushToDisplay();
+}
+
+void DisplayManager::drawWifiResultScreen(bool connected, const String &message) {
+  if (!canvas)
+    return;
+
+  canvas->fillScreen(0x0000);
+
+  // Title
+  const char* title = "WIFI SETUP";
+  uint16_t w, h;
+  dotTextBounds(title, 3, &w, &h);
+  dotText(canvas, title, (canvas->width() - w) / 2, 15, 3, 0x07FF);
+
+  // Status icon
+  int16_t iconX = (canvas->width() - 48) / 2;
+  int16_t iconY = 60;
+  uint16_t iconCol = connected ? 0x07E0 : 0xF800;
+  canvas->drawBitmap(iconX, iconY, ICON_WIFI_48, 48, 48, iconCol);
+
+  // Status word
+  const char* status = connected ? "Connected" : "Failed";
+  dotTextBounds(status, 3, &w, &h);
+  dotText(canvas, status, (canvas->width() - w) / 2, iconY + 48 + 15, 3,
+          iconCol);
+
+  // Message (truncated to screen width)
+  String msg = message;
+  if (msg.length() > 32) {
+    msg = msg.substring(0, 29) + "...";
+  }
+  dotTextBounds(msg.c_str(), 2, &w, &h);
+  dotText(canvas, msg.c_str(), (canvas->width() - w) / 2, iconY + 48 + 55, 2,
+          0xFFFF);
+
+  pushToDisplay();
+}
+
 // ponytail: MM:SS.CC from milliseconds. Caps at 99 minutes; a wrist stopwatch
 // session rarely exceeds that. Ceiling: rolls over at 100 min. Upgrade: hours.
 static String formatSw(uint32_t ms) {

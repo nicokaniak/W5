@@ -17,6 +17,9 @@ public:
   static void drawBatteryScreen();
   static void drawBluetoothScreen();
   static void drawWifiConnecting();
+  static void drawConfigMenu(uint8_t selectedIndex);
+  static void drawWifiPortalScreen();
+  static void drawWifiResultScreen(bool connected, const String &message);
 
 private:
   static GFXcanvas16 *canvas;

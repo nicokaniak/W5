@@ -115,8 +115,7 @@ void loop() {
     }
     case MODE_CONFIG:
       if (MenuManager::consumeDirty()) {
-        DisplayManager::clearDisplay();
-        DisplayManager::drawText("Configuration (TODO)", 10, 30);
+        DisplayManager::drawConfigMenu(MenuManager::configSelectedIndex());
       }
       break;
   }

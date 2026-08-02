@@ -36,6 +36,24 @@ String getWeatherCodeDescription(int code) {
   return "Unknown";
 }
 
+// Try previously-saved credentials (e.g. from WiFiManager), showing the same
+// pulsing wifi icon during the connect window.
+static bool tryConnectSaved() {
+  Serial.println("Trying saved Wi-Fi credentials...");
+  // ponytail: WiFi.begin() with no SSID uses the last stored STA config.
+  // If nothing is saved, it will fail through the same 4s window as a normal try.
+  WiFi.begin();
+
+  int retryCount = 0;
+  while (WiFi.status() != WL_CONNECTED && retryCount < 20) {
+    DisplayManager::drawWifiConnecting();
+    delay(200);
+    retryCount++;
+  }
+  Serial.println();
+  return WiFi.status() == WL_CONNECTED;
+}
+
 // Try one network, showing pulsing wifi icon during the 10s connect window.
 static bool tryConnect(const char *ssid, const char *password) {
   Serial.printf("Connecting to \"%s\"...\n", ssid);
@@ -58,11 +76,19 @@ void WeatherManager::initWeather() {
 
   bool connected = false;
 
-  // Phase 1: Saved networks first — these have real internet, so NTP/weather
+  // Phase 0: Credentials saved by on-device setup (e.g. WiFiManager).
+  // These take precedence so a user who reconfigured Wi-Fi doesn't have to
+  // rebuild and reflash just to update the hardcoded list.
+  if (tryConnectSaved()) {
+    Serial.println("Connected to saved credentials");
+    connected = true;
+  }
+
+  // Phase 1: Hardcoded saved networks — these have real internet, so NTP/weather
   // work. Open networks used to be tried first, which often latched onto a
   // captive portal: WiFi showed "connected" but NTP couldn't reach the internet,
   // leaving the clock stuck at 00:00:00.
-  for (int i = 0; i < WIFI_NETWORK_COUNT; i++) {
+  for (int i = 0; i < WIFI_NETWORK_COUNT && !connected; i++) {
     if (tryConnect(WIFI_NETWORKS[i].ssid, WIFI_NETWORKS[i].password)) {
       Serial.println("Connected to saved network");
       connected = true;
