@@ -158,20 +158,19 @@ void DisplayManager::drawWeatherScreen() {
 
   canvas->fillScreen(0x0000);
 
-  // Display is 240 wide x 536 tall (portrait).
+  // Display is 536 wide x 240 tall (landscape).
   // Layout:
-  //   0-60:   Title + current weather icon
-  //   60-100: Current temp text
-  //  100-380: Graph area (temperature line + precipitation fill)
-  //  380-420: Hour labels under graph
-  //  420-536: Legend + location
+  //   0-30:    Title + current temp + weather icon
+  //  35-165:   Graph area (temperature line + precipitation fill)
+  // 170-178:   Hour labels under graph
+  // 185-235:   Legend + min/max + location (single row, 536px wide)
 
   // --- Title ---
-  dotText(canvas, "WEATHER", 10, 10, 3, 0xFFE0); // yellow, size 3
+  dotText(canvas, "WEATHER", 10, 5, 3, 0xFFE0); // yellow, size 3
 
   if (!WeatherManager::hasHourlyData()) {
-    dotText(canvas, "Fetching forecast...", 10, 60, 2, 0x7BEF);
-    dotText(canvas, "Updates every 10 min", 10, 90, 1, 0x7BEF);
+    dotText(canvas, "Fetching forecast...", 10, 40, 2, 0x7BEF);
+    dotText(canvas, "Updates every 10 min", 10, 65, 1, 0x7BEF);
     pushToDisplay();
     return;
   }
@@ -179,7 +178,7 @@ void DisplayManager::drawWeatherScreen() {
   const HourlyForecast &fc = WeatherManager::getHourlyForecast();
   uint8_t n = fc.count;
   if (n == 0) {
-    dotText(canvas, "No data", 10, 60, 2, 0xF800);
+    dotText(canvas, "No data", 10, 40, 2, 0xF800);
     pushToDisplay();
     return;
   }
@@ -191,19 +190,29 @@ void DisplayManager::drawWeatherScreen() {
     canvas->drawBitmap(canvas->width() - iw - 10, 5, icon, iw, ih, 0xFFFF);
   }
 
-  // --- Current temperature text ---
+  // --- Current temperature text (below title) ---
   String currTemp = String((int)round(fc.temperature[0]));
-  dotText(canvas, (currTemp + "C").c_str(), 10, 45, 3, 0xFFFF); // white, size 3
+  dotText(canvas, (currTemp + "C").c_str(), 140, 12, 2, 0xFFFF); // white, size 2
 
   // --- Graph area ---
-  // ponytail: graph spans the full 240px width with small margins.
+  // ponytail: graph leaves 34px on the left for the temperature ruler labels.
   // Temperature is a red line, precipitation is a light-blue filled area.
   // Both share the same x-axis (hours). Y-axes are independent.
-  const int16_t graphX = 10;
-  const int16_t graphW = canvas->width() - 20;  // 220px
-  const int16_t graphY = 100;
-  const int16_t graphH = 260;
-  const int16_t graphBottom = graphY + graphH;  // 360
+  const int16_t rulerW = 24;
+  const int16_t graphX = 10 + rulerW;           // 34
+  const int16_t graphW = canvas->width() - 20 - rulerW;  // 492px
+  const int16_t graphY = 35;
+  const int16_t graphH = 130;
+  const int16_t graphBottom = graphY + graphH;  // 165
+
+  // Guard against single data point (division by zero in x mapping)
+  if (n < 2) {
+    int16_t x = graphX + graphW / 2;
+    int16_t y = graphY + graphH / 2;
+    canvas->fillCircle(x, y, 3, 0xF800);
+    pushToDisplay();
+    return;
+  }
 
   // Find min/max for temperature scaling
   float tempMin = fc.temperature[0], tempMax = fc.temperature[0];
@@ -223,7 +232,6 @@ void DisplayManager::drawWeatherScreen() {
   // ponytail: filled area chart using vertical strips per data point.
   // RGB565 light blue: 0x4B5F (approx #29B5FE)
   const uint16_t PRECIP_COLOR = 0x4B5F;
-  const uint16_t PRECIP_ALPHA  = 0x39FF; // dimmer for overlap visibility
 
   for (uint8_t i = 0; i < n; i++) {
     int16_t x = graphX + (int16_t)(graphW * i) / (n - 1);
@@ -265,8 +273,30 @@ void DisplayManager::drawWeatherScreen() {
   // --- Graph border ---
   canvas->drawRect(graphX, graphY, graphW, graphH, 0x4208); // dark gray border
 
+  // --- Temperature ruler (left side) ---
+  // ponytail: 3 tick marks + labels (max, mid, min) aligned to the graph's y-scale.
+  // Shows the actual temp range so you can read values off the red line.
+  const uint16_t RULER_COLOR = 0x8410; // dark gray
+  int tempHi = (int)round(tempMax - 1); // undo the pad
+  int tempLo = (int)round(tempMin + 1);
+  int tempMid = (tempHi + tempLo) / 2;
+
+  struct { int16_t y; int val; } ticks[] = {
+    { graphY,              tempHi },
+    { graphY + graphH / 2, tempMid },
+    { graphBottom,        tempLo },
+  };
+  for (auto &t : ticks) {
+    // tick mark on the left edge of the graph
+    canvas->drawLine(graphX - 4, t.y, graphX, t.y, RULER_COLOR);
+    // label just left of the tick
+    char buf[8];
+    snprintf(buf, sizeof(buf), "%d", t.val);
+    dotText(canvas, buf, graphX - 22, t.y - 4, 1, 0x7BEF);
+  }
+
   // --- Hour labels under graph ---
-  // ponytail: show every 3rd hour to fit 240px width. Size 1 dot text.
+  // ponytail: show every 3rd hour to fit. Size 1 dot text.
   const int16_t labelY = graphBottom + 5;
   for (uint8_t i = 0; i < n; i += 3) {
     int16_t x = graphX + (int16_t)(graphW * i) / (n - 1);
@@ -276,8 +306,8 @@ void DisplayManager::drawWeatherScreen() {
     dotText(canvas, buf, x - 6, labelY, 1, 0x7BEF); // gray, size 1
   }
 
-  // --- Legend ---
-  const int16_t legendY = labelY + 20;
+  // --- Legend + location (single row at y=185) ---
+  const int16_t legendY = 185;
   // Precipitation swatch
   canvas->fillRect(10, legendY, 12, 12, PRECIP_COLOR);
   dotText(canvas, "Rain", 28, legendY - 2, 1, 0x7BEF);
@@ -287,14 +317,8 @@ void DisplayManager::drawWeatherScreen() {
   canvas->fillCircle(96, legendY + 6, 2, TEMP_COLOR);
   dotText(canvas, "Temp", 108, legendY - 2, 1, 0x7BEF);
 
-  // --- Min/Max temp labels ---
-  String minStr = String((int)round(tempMin + 1)); // undo the pad
-  String maxStr = String((int)round(tempMax - 1));
-  dotText(canvas, ("Lo " + minStr + "C").c_str(), 10, legendY + 20, 1, 0x7BEF);
-  dotText(canvas, ("Hi " + maxStr + "C").c_str(), 90, legendY + 20, 1, 0x7BEF);
-
-  // --- Location ---
-  dotText(canvas, "Copenhagen", 10, legendY + 40, 1, 0x7BEF);
+  // --- Location (right-aligned) ---
+  dotText(canvas, "Copenhagen", canvas->width() - 90, legendY - 2, 1, 0x7BEF);
 
   pushToDisplay();
 }

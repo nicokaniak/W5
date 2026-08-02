@@ -240,6 +240,13 @@ void lcd_PushColors(uint16_t x,
                     uint16_t high,
                     uint16_t *data)
 {
+    // ponytail: swap bytes — ESP32 is little-endian, RM67162 expects MSB-first.
+    // Without this, 0xF800 (red) is sent as [0x00, 0xF8] → display reads 0x00F8 (blue).
+    size_t total = (size_t)width * high;
+    for (size_t i = 0; i < total; i++) {
+        data[i] = (data[i] >> 8) | (data[i] << 8);
+    }
+
 #if LCD_USB_QSPI_DREVER == 1
     bool first_send = 1;
     size_t len = width * high;
@@ -295,6 +302,11 @@ void lcd_PushColors(uint16_t x,
 
 void lcd_PushColors(uint16_t *data, uint32_t len)
 {
+    // ponytail: swap bytes — ESP32 is little-endian, RM67162 expects MSB-first.
+    for (uint32_t i = 0; i < len; i++) {
+        data[i] = (data[i] >> 8) | (data[i] << 8);
+    }
+
 #if LCD_USB_QSPI_DREVER == 1
     bool first_send = 1;
     uint16_t *p = (uint16_t *)data;
