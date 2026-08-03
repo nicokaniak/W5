@@ -619,11 +619,13 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
   bool wifiOn = (WiFi.status() == WL_CONNECTED);
   int batPct = BatteryManager::getPercentage();
   uint8_t batIw = 0, batIh = 0;
-  // ponytail: charging == USB cable plugged (VBUS present), detected via the
-  // ESP32-S3 USB-Serial-JTAG peripheral. Ceiling: reads "charging" whenever
-  // USB is connected even if no power flows (e.g. a PC port); a dumb charger
-  // without the USB handshake may not register. Upgrade: wire a GPIO to VBUS.
-  bool charging = HWCDCSerial.isPlugged();
+  // ponytail: charging == USB cable plugged (VBUS present). Two signals:
+  // 1. HWCDCSerial.isPlugged() — SOF packets from a USB host (PC/data cable).
+  // 2. BatteryManager::isUsbPowerConnected() — ADC voltage >4.4V on GPIO4,
+  //    which detects dumb chargers that don't send SOF. The T-Display-S3
+  //    AMOLED has no VBUS GPIO, so the ADC threshold is the only software
+  //    option for charger detection. Upgrade: wire a GPIO to VBUS.
+  bool charging = HWCDCSerial.isPlugged() || BatteryManager::isUsbPowerConnected();
   const unsigned char *batIcon = charging
       ? (batIw = 32, batIh = 32, BATICON_BATTERY_CHARGING)
       : batteryIconBitmap(batPct, &batIw, &batIh);

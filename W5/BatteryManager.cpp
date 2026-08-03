@@ -48,3 +48,19 @@ int BatteryManager::getPercentage() {
 
   return percentage;
 }
+
+bool BatteryManager::isUsbPowerConnected() {
+  // ponytail: T-Display-S3 AMOLED has no VBUS GPIO and no charger IC with I2C
+  // status. USB-Serial-JTAG only detects USB host (PC) via SOF packets — dumb
+  // chargers don't send SOF. The ADC on GPIO4 reads ~4.7V when USB power is
+  // present vs ~3.3-4.2V on battery alone. analogReadMilliVolts() uses eFuse
+  // calibration (~±2%) so a 4.4V threshold cleanly separates the two.
+  // Hysteresis (4.4V rise / 4.25V fall) prevents flickering near the boundary.
+  // Ceiling: a deeply uncalibrated ADC could false-trigger; upgrade: wire a
+  // GPIO to VBUS through a voltage divider.
+  static bool usbConnected = false;
+  int mv = analogReadMilliVolts(PIN_BAT_VOLT) * 2; // 2x voltage divider
+  if (!usbConnected && mv > 4400) usbConnected = true;
+  if (usbConnected && mv < 4250) usbConnected = false;
+  return usbConnected;
+}

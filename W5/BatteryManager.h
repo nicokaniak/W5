@@ -8,6 +8,7 @@ public:
   static void initBattery();
   static float getVoltage();
   static int getPercentage();
+  static bool isUsbPowerConnected();
 };
 
 #endif
