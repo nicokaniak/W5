@@ -165,6 +165,27 @@ static void drawTinyDigits(GFXcanvas16 *c, int value, int nDigits,
   }
 }
 
+// Draw small L-shaped corner brackets around a bounding box.
+// leg = length of each L arm in pixels.
+static void drawCornerBrackets(GFXcanvas16 *c, int16_t x, int16_t y,
+                               int16_t w, int16_t h, uint8_t leg,
+                               uint16_t color) {
+  if (w < 2 || h < 2) return;
+  int16_t rx = x + w - 1, by = y + h - 1;
+  // Top-left
+  c->drawFastHLine(x, y, leg, color);
+  c->drawFastVLine(x, y, leg, color);
+  // Top-right
+  c->drawFastHLine(rx - leg + 1, y, leg, color);
+  c->drawFastVLine(rx, y, leg, color);
+  // Bottom-left
+  c->drawFastHLine(x, by, leg, color);
+  c->drawFastVLine(x, by - leg + 1, leg, color);
+  // Bottom-right
+  c->drawFastHLine(rx - leg + 1, by, leg, color);
+  c->drawFastVLine(rx, by - leg + 1, leg, color);
+}
+
 // Draw a 1-bit PROGMEM bitmap scaled up by integer `scale`. Used to make the
 // 33x53 7-seg digits fill the top half of the screen. fillRect per set pixel.
 static void drawBitmapScaled(GFXcanvas16 *c, int16_t x, int16_t y,
@@ -516,6 +537,24 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
   } else {
     dotText(canvas, "T:--", rightX, 185, 2, LABEL_COLOR);
   }
+
+  // --- Corner brackets around each section ---
+  const uint16_t BRACKET_COLOR = LABEL_COLOR; // gray
+  const uint8_t BRACKET_LEG = 8;
+  // Time (top-left, scaled clock)
+  drawCornerBrackets(canvas, timeX - 4, timeY - 4,
+                     clockW + 8, DH + 8, BRACKET_LEG, BRACKET_COLOR);
+  // Calendar (lower-left, DOW + date block)
+  drawCornerBrackets(canvas, groupX - 4, groupY - 4,
+                     groupW + 8, dateBlockH + 8, BRACKET_LEG, BRACKET_COLOR);
+  // Moon (right, scaled 2x)
+  drawCornerBrackets(canvas, moonX - 4, moonY - 4,
+                     MOON_SIZE + 8, MOON_SIZE + 8, BRACKET_LEG, BRACKET_COLOR);
+  // SR/SS stacked times (dead space between clock and moon)
+  drawCornerBrackets(canvas, 330, 158, 84, 82, BRACKET_LEG, BRACKET_COLOR);
+  // Temperature (right column, between arc and SS)
+  drawCornerBrackets(canvas, rightX - 4, 181, 84, 33, BRACKET_LEG,
+                     BRACKET_COLOR);
 
   // Push buffer to display
   pushToDisplay();
