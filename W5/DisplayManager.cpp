@@ -468,7 +468,7 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
   // --- Top section: big scaled 7-seg clock ---
   // Digit native 33x53. Scale 2 → 66x106. Top section ~120px tall, fits.
   // 4 digits + colon + gaps. Width = 4*66 + colon(16) + 2*gap(12) = 304.
-  const uint16_t TIME_COLOR = 0x07FF; // cyan
+  const uint16_t TIME_COLOR = 0xFFFF; // white
   const int SCALE = 2;
   const int DW = 33 * SCALE;  // 66
   const int DH = 53 * SCALE;  // 106
@@ -678,7 +678,7 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
     int srH = sr / 60, srM = sr % 60;
     int ssH = ss / 60, ssM = ss % 60;
 
-    const int16_t ssX = 170;      // right of date group (ends ~160)
+    const int16_t ssX = 190;      // right of date group (ends ~160), gap for breathing room
     const int16_t labelW = 35;    // "SR"/"SS" at size 3 (16x25, gap 3)
     const int16_t labelGap = 4;
     const int16_t digitX = ssX + labelW + labelGap;
@@ -702,20 +702,21 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
     canvas->fillCircle(ssColonX, ssY + 16, 2, SUN_LABEL_COLOR);
     drawSmallDigits(canvas, ssM, 2, ssColonX + 4, ssY, SUN_LABEL_COLOR);
   } else {
-    drawText7seg(canvas, "Sun: N/A", 170, 190, 1, LABEL_COLOR);
+    drawText7seg(canvas, "Sun: N/A", 190, 190, 1, LABEL_COLOR);
   }
 
   // --- Day progress bar under the clock ---
   // Full 24h (midnight→midnight). Hatched edges = sleeping (night: 0→sunrise,
   // sunset→1440). Clear middle = awake (sunrise→sunset). Triangle = now.
-  // ponytail: hatch is a fixed 3px-pitch diagonal scan; ceiling = barH>~20px
-  // would leave gaps — upgrade to a tiled PROGMEM pattern if enlarged.
+  // ponytail: hatch is a fixed 3px-pitch diagonal scan; at barH=20 the
+  // diagonals still cover without gaps. Enlarge past ~24 and upgrade to a
+  // tiled PROGMEM pattern.
   if (sr >= 0 && ss >= 0) {
     const int16_t barX = timeX;
-    const int16_t barY = 148;
+    const int16_t barY = 140;
     const int16_t barW = clockW;
-    const int16_t barH = 12;
-    const uint16_t HATCH_COLOR = 0x4208; // dim blue-gray, sleepy
+    const int16_t barH = 20;
+    const uint16_t HATCH_COLOR = 0x6B4E; // lighter blue-gray, sleepy
 
     // Hatched sleeping edges first, then border on top.
     int16_t srX = barX + (int32_t)sr * barW / 1440;
@@ -738,7 +739,7 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
   }
 
   // Temperature (yellow, right column, aligned vertically with SS time)
-  const uint16_t TEMP_COLOR = 0xFFE0;
+  const uint16_t TEMP_COLOR = 0xFFFF; // white
   String tempStr = WeatherManager::getTemperature();
   bool tempValid = tempStr.length() > 0 && isDigit(tempStr.charAt(0));
   if (tempValid) {
@@ -770,7 +771,7 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
   drawCornerBrackets(canvas, globeX - 4, globeY - 4,
                      GLOBE_SIZE + 8, GLOBE_SIZE + 8, BRACKET_LEG, BRACKET_COLOR);
   // SR/SS inline times (left, aligned with date group rows)
-  drawCornerBrackets(canvas, 166, 174, 121, 62, BRACKET_LEG, BRACKET_COLOR);
+  drawCornerBrackets(canvas, 186, 174, 121, 62, BRACKET_LEG, BRACKET_COLOR);
   // Temperature (right column, aligned with SS time)
   drawCornerBrackets(canvas, rightX - 4, 208, 84, 32, BRACKET_LEG,
                      BRACKET_COLOR);
