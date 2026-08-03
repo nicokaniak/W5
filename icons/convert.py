@@ -50,7 +50,7 @@ BATTERY_ICON_SPECS = [
     ("battery-full.png",     "BATTERY_FULL"),
     ("battery-charging.png", "BATTERY_CHARGING"),
 ]
-BATTERY_ICON_SIZE = 24
+BATTERY_ICON_SIZE = 32
 
 def pack_1bit(im_luma):
     """im_luma: PIL 'L' mode. Return list of bytes, MSB-first, row-padded."""
