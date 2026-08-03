@@ -152,8 +152,18 @@ void WeatherManager::updateWeather() {
     if (httpCode == 200) {
       String payload = http.getString();
 
+      // ponytail: open-meteo emits a "current_weather_units" block before the
+      // real "current_weather" block, and both contain the same keys (temperature,
+      // windspeed, weathercode). A naive indexOf matches the units block first,
+      // which holds string units like "°C" instead of the numeric value. Anchor
+      // all key searches to the actual current_weather object so we parse values,
+      // not units. Ceiling: if open-meteo renames the key, this breaks. Upgrade
+      // path: ArduinoJson.
+      int cwIdx = payload.indexOf("\"current_weather\":{");
+      if (cwIdx < 0) cwIdx = 0; // fall back to whole payload if shape changes
+
       // Parse temperature
-      int tempIdx = payload.indexOf("\"temperature\":");
+      int tempIdx = payload.indexOf("\"temperature\":", cwIdx);
       if (tempIdx != -1) {
         int start = tempIdx + 14;
         int end = payload.indexOf(",", start);
@@ -163,7 +173,7 @@ void WeatherManager::updateWeather() {
       }
 
       // Parse wind speed
-      int windIdx = payload.indexOf("\"windspeed\":");
+      int windIdx = payload.indexOf("\"windspeed\":", cwIdx);
       if (windIdx != -1) {
         int start = windIdx + 12;
         int end = payload.indexOf(",", start);
@@ -171,7 +181,7 @@ void WeatherManager::updateWeather() {
       }
 
       // Parse weather code
-      int codeIdx = payload.indexOf("\"weathercode\":");
+      int codeIdx = payload.indexOf("\"weathercode\":", cwIdx);
       if (codeIdx != -1) {
         int start = codeIdx + 14;
         int end = payload.indexOf(",", start);

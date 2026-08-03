@@ -502,9 +502,10 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
     int srH = sr / 60, srM = sr % 60;
     int ssH = ss / 60, ssM = ss % 60;
 
-    // SR/SS times stacked vertically in the dead space (x≈334-414, y>162).
+    // SR/SS times stacked vertically in the dead space between calendar
+    // (ends ~232) and T (starts ~410). Centered in that 178px gap.
     // Each row: label above, HH:MM below. Small 7-seg digits (16x25).
-    const int16_t ssX = 334;       // left edge of stacked times
+    const int16_t ssX = 283;       // left edge of stacked times
     const int16_t srLabelY = 162;
     const int16_t srTimeY  = 172;  // digits end at 197
     const int16_t ssLabelY = 202;
@@ -562,7 +563,7 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
   drawCornerBrackets(canvas, moonX - 4, moonY - 4,
                      MOON_SIZE + 8, MOON_SIZE + 8, BRACKET_LEG, BRACKET_COLOR);
   // SR/SS stacked times (dead space between clock and moon)
-  drawCornerBrackets(canvas, 330, 158, 84, 82, BRACKET_LEG, BRACKET_COLOR);
+  drawCornerBrackets(canvas, 279, 158, 84, 82, BRACKET_LEG, BRACKET_COLOR);
   // Temperature (right column, between arc and SS)
   drawCornerBrackets(canvas, rightX - 4, 181, 84, 33, BRACKET_LEG,
                      BRACKET_COLOR);
