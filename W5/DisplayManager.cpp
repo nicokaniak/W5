@@ -6,10 +6,15 @@
 #include "StopwatchManager.h"
 #include "TimeManager.h"
 #include "WeatherManager.h"
+#include "config/config.h" // LATITUDE / LONGITUDE for Dusk2Dawn
+#include "Dusk2Dawn.h"
+#include "moonPhaser.h"
+#include "starfield_icons.h" // 7-seg digits, moon phases, am/pm, wifi (from watchy-starfield)
 #include "icons.h" // 1-bit PROGMEM menu icons (generated from icons/*.png)
 #include "weather_icons.h" // 1-bit PROGMEM weather icons (generated from icons/weather/*.png)
 #include "rm67162.h" // For lcd_PushColors
 #include <math.h>
+#include <WiFi.h>
 
 static RM67162Display display;
 GFXcanvas16 *DisplayManager::canvas = nullptr;
@@ -75,6 +80,114 @@ static void dotText(GFXcanvas16 *c, const char *s, int16_t x, int16_t y,
   }
 }
 
+// ----- Starfield watch face helpers -----
+// Adapted from watchy-starfield-main: 7-seg digit bitmaps, moon phase,
+// sunrise/sunset, procedural starfield background. Layout is landscape
+// (536x240) instead of the original 200x200 portrait e-paper.
+
+static moonPhaser s_moonP;
+
+// ponytail: 16-bit LCG for a deterministic starfield. Same seed → same stars
+// every frame, so the background is stable across redraws. Ceiling: stars
+// are fixed at boot; no drift/twinkle. Upgrade: animate with millis().
+static uint32_t s_starSeed = 0x1234ABCD;
+static inline uint32_t lcg16() {
+  s_starSeed = s_starSeed * 1103515245u + 12345u;
+  return (s_starSeed >> 16) & 0x7FFF;
+}
+
+// Draw n deterministic stars onto the canvas. Sizes vary 1-2px for depth.
+static void drawStarfield(GFXcanvas16 *c, int n) {
+  s_starSeed = 0x1234ABCD; // reset for determinism
+  for (int i = 0; i < n; i++) {
+    int16_t x = (int16_t)(lcg16() % c->width());
+    int16_t y = (int16_t)(lcg16() % c->height());
+    uint8_t  r = (lcg16() & 1) ? 2 : 1;
+    // Dim white/blue stars for depth — RGB565
+    uint16_t col = (lcg16() & 3) == 0 ? 0xBDF7 : 0xFFFF; // 25% bluish, rest white
+    if (r == 1)
+      c->drawPixel(x, y, col);
+    else
+      c->fillCircle(x, y, 1, col);
+  }
+}
+
+// 7-seg big digit (33x53) lookup. fd_0..fd_9 from starfield_icons.h.
+static const unsigned char *fdDigits[] = {
+  fd_0, fd_1, fd_2, fd_3, fd_4, fd_5, fd_6, fd_7, fd_8, fd_9
+};
+// 7-seg small digit (16x25) lookup. dd_0..dd_9
+static const unsigned char *ddDigits[] = {
+  dd_0, dd_1, dd_2, dd_3, dd_4, dd_5, dd_6, dd_7, dd_8, dd_9
+};
+// 3x5 tiny digit lookup. num_0..num_9
+static const unsigned char *numDigits[] = {
+  num_0, num_1, num_2, num_3, num_4, num_5, num_6, num_7, num_8, num_9
+};
+
+// Draw a multi-digit 7-seg number at (x,y) using big 33x53 bitmaps.
+// Returns the total width drawn.
+static int drawBigDigits(GFXcanvas16 *c, int value, int nDigits,
+                         int16_t x, int16_t y, uint16_t color) {
+  const int dw = 33, dh = 53, gap = 4;
+  for (int i = nDigits - 1; i >= 0; i--) {
+    int d = value % 10;
+    value /= 10;
+    int16_t dx = x + i * (dw + gap);
+    c->drawBitmap(dx, y, fdDigits[d], dw, dh, color);
+  }
+  return nDigits * (dw + gap) - gap;
+}
+
+// Draw a multi-digit 7-seg number at (x,y) using small 16x25 bitmaps.
+static int drawSmallDigits(GFXcanvas16 *c, int value, int nDigits,
+                           int16_t x, int16_t y, uint16_t color) {
+  const int dw = 16, dh = 25, gap = 3;
+  for (int i = nDigits - 1; i >= 0; i--) {
+    int d = value % 10;
+    value /= 10;
+    int16_t dx = x + i * (dw + gap);
+    c->drawBitmap(dx, y, ddDigits[d], dw, dh, color);
+  }
+  return nDigits * (dw + gap) - gap;
+}
+
+// Draw a 3x5 tiny digit at (x,y) — used for sunrise/sunset HH:MM.
+static void drawTinyDigits(GFXcanvas16 *c, int value, int nDigits,
+                           int16_t x, int16_t y, uint16_t color) {
+  const int dw = 3, dh = 5, gap = 1;
+  for (int i = nDigits - 1; i >= 0; i--) {
+    int d = value % 10;
+    value /= 10;
+    int16_t dx = x + i * (dw + gap);
+    c->drawBitmap(dx, y, numDigits[d], dw, dh, color);
+  }
+}
+
+// Pick the moon phase bitmap based on angle (0-360) and percentLit (0-1).
+// Waxing (0-180): luna1..luna7,12. Waning (180-360): luna1..luna7,12.
+static const unsigned char *moonBitmap(int angle, double lit) {
+  // luna1 = new, luna7 = full, luna12 = waning crescent
+  // Waxing: 1(new) → 12 → 11 → 10 → 9 → 8 → 7(full)
+  // Waning: 1(new) → 2 → 3 → 4 → 5 → 6 → 7(full)
+  if (angle <= 180) {
+    if (lit < 0.1)  return luna1;
+    if (lit < 0.25) return luna12;
+    if (lit < 0.4)  return luna11;
+    if (lit < 0.6)  return luna10;
+    if (lit < 0.75) return luna9;
+    if (lit < 0.9)  return luna8;
+    return luna7;
+  }
+  if (lit < 0.1)  return luna1;
+  if (lit < 0.25) return luna2;
+  if (lit < 0.4)  return luna3;
+  if (lit < 0.6)  return luna4;
+  if (lit < 0.75) return luna5;
+  if (lit < 0.9)  return luna6;
+  return luna7;
+}
+
 void DisplayManager::initDisplay() {
   display.begin();
   display.setRotation(1);     // Landscape
@@ -123,30 +236,210 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
   if (!canvas)
     return;
 
-  // Draw to off-screen buffer
-  canvas->fillScreen(0x0000);
+  // ----- Starfield watch face (adapted from watchy-starfield-main) -----
+  // Layout (536x240 landscape, 3 columns):
+  //   Left   0-180:  Big 7-seg time HH:MM (cyan) + AM/PM
+  //   Mid  180-360:  Date (DOW + DD MON YYYY), temperature, battery bar
+  //   Right 360-536: Moon phase, sunrise/sunset with sun-arc arrow, wifi
 
-  uint16_t w, h;
-  dotTextBounds(timeStr.c_str(), 8, &w, &h);
-  int16_t x = (canvas->width() - w) / 2;
-  int16_t y = (canvas->height() - h) / 2;
-  dotText(canvas, timeStr.c_str(), x, y, 8, 0x07FF); // cyan, size 8
+  canvas->fillScreen(0x0000); // black background
+  drawStarfield(canvas, 60);   // deterministic procedural stars
 
-  // ----- Date (top-left, small) -----
-  String dateStr = TimeManager::getCurrentDate();
-  if (dateStr.length()) {
-    dotText(canvas, dateStr.c_str(), 8, 8, 4, 0x07FF); // cyan, same as time
+  // Fetch local time once for all date/moon/sun calculations below.
+  struct tm timeinfo;
+  bool haveTime = getLocalTime(&timeinfo, 10);
+
+  // --- Parse time string "HH:MM:SS" ---
+  // TimeManager::getCurrentTime() returns "HH:MM:SS" (24-hour).
+  int hh = timeStr.substring(0, 2).toInt();
+  int mm = timeStr.substring(3, 5).toInt();
+
+  // --- Left column: big 7-seg time ---
+  // 4 digits at 33x53 each, 4px gap = 140px total. Center in ~180px column.
+  const uint16_t TIME_COLOR = 0x07FF; // cyan
+  const int16_t timeX = 20;
+  const int16_t timeY = (canvas->height() - 53) / 2; // vertically centered
+  drawBigDigits(canvas, hh, 2, timeX, timeY, TIME_COLOR);
+  // Colon between HH and MM. HH ends at timeX + 2*(33+4) - 4 = timeX+70.
+  // MM starts at timeX + 2*(33+4) + 8 = timeX+78. Colon centered at timeX+74.
+  const int16_t colonX = timeX + 2 * (33 + 4) + 4;
+  canvas->fillCircle(colonX, timeY + 18, 3, TIME_COLOR);
+  canvas->fillCircle(colonX, timeY + 35, 3, TIME_COLOR);
+  drawBigDigits(canvas, mm, 2, timeX + 2 * (33 + 4) + 8, timeY, TIME_COLOR);
+
+  // --- Middle column: date + temp + battery ---
+  const int16_t midX = 195;
+  const uint16_t DATE_COLOR = 0xBDF7; // light blue-white
+  const uint16_t LABEL_COLOR = 0x7BEF; // gray
+
+  // Day of week (dot text, top of middle column)
+  String dateStr = TimeManager::getCurrentDate(); // "Mon 25/12"
+  if (dateStr.length() >= 3) {
+    String dow = dateStr.substring(0, 3); // "Mon"
+    dotText(canvas, dow.c_str(), midX, 8, 2, DATE_COLOR);
   }
 
-  // ----- Battery bar (bottom-right) -----
+  // Day + month as small 7-seg digits (16x25)
+  // Parse day and month from the date string "Mon 25/12" or similar
+  int dayNum = 0, monthNum = 0;
+  int slashIdx = dateStr.indexOf('/');
+  if (slashIdx > 0) {
+    int spaceIdx = dateStr.indexOf(' ');
+    if (spaceIdx >= 0) {
+      dayNum = dateStr.substring(spaceIdx + 1, slashIdx).toInt();
+      monthNum = dateStr.substring(slashIdx + 1).toInt();
+    }
+  }
+
+  // Draw day (2 digits) at y=30
+  if (dayNum > 0) {
+    drawSmallDigits(canvas, dayNum, 2, midX, 30, DATE_COLOR);
+    // Month (2 digits) to the right of day
+    drawSmallDigits(canvas, monthNum, 2, midX + 2 * (16 + 3) + 6, 30, DATE_COLOR);
+  }
+
+  // Year (4 small digits) at y=62
+  int year = haveTime ? timeinfo.tm_year + 1900 : 2025;
+  drawSmallDigits(canvas, year, 4, midX, 62, DATE_COLOR);
+
+  // Temperature (replaces step count from the original starfield face)
+  // WeatherManager::getTemperature() returns "12.3" or "Error" / "No WiFi".
+  const uint16_t TEMP_COLOR = 0xFFE0; // yellow
+  String tempStr = WeatherManager::getTemperature();
+  // Only show if it's a valid number (not "Error"/"No WiFi")
+  bool tempValid = tempStr.length() > 0 && isDigit(tempStr.charAt(0));
+  if (tempValid) {
+    // Draw "T:" label + temperature value + "C"
+    dotText(canvas, "T:", midX, 100, 2, LABEL_COLOR);
+    // Truncate to integer part for the 7-seg display
+    int dotPos = tempStr.indexOf('.');
+    int tempInt;
+    if (dotPos > 0) {
+      tempInt = tempStr.substring(0, dotPos).toInt();
+    } else {
+      tempInt = tempStr.toInt();
+    }
+    // Handle negative temps
+    if (tempInt < 0) {
+      dotText(canvas, "-", midX + 24, 100, 2, TEMP_COLOR);
+      drawSmallDigits(canvas, -tempInt, 2, midX + 44, 100, TEMP_COLOR);
+    } else {
+      drawSmallDigits(canvas, tempInt, 2, midX + 24, 100, TEMP_COLOR);
+    }
+    dotText(canvas, "C", midX + 2 * (16 + 3) + 44, 100, 2, TEMP_COLOR);
+  } else {
+    dotText(canvas, "T:--", midX, 100, 2, LABEL_COLOR);
+  }
+
+  // Battery bar (bottom of middle column)
   int batPct = BatteryManager::getPercentage();
-  int barWidth = map(batPct, 0, 100, 0, 50); // max 50 px width
-  int barX = canvas->width() - 55;           // 5 px margin from right edge
-  int barY = canvas->height() - 10;          // 10 px from bottom
-  // background (light gray)
-  canvas->fillRect(barX, barY, 50, 8, 0x7BEF);
-  // fill proportional to charge (green)
-  canvas->fillRect(barX, barY, barWidth, 8, 0x07E0);
+  int barWidth = map(batPct, 0, 100, 0, 100);
+  const int16_t batX = midX;
+  const int16_t batY = 145;
+  canvas->fillRect(batX, batY, 100, 10, 0x4208); // dark gray background
+  uint16_t batCol;
+  if (batPct > 50)      batCol = 0x07E0; // green
+  else if (batPct > 20) batCol = 0xFFE0; // yellow
+  else                 batCol = 0xF800; // red
+  canvas->fillRect(batX, batY, barWidth, 10, batCol);
+  // Battery percentage label
+  char batBuf[8];
+  snprintf(batBuf, sizeof(batBuf), "%d%%", batPct);
+  dotText(canvas, batBuf, batX, batY + 14, 1, LABEL_COLOR);
+
+  // --- Right column: moon phase + sunrise/sunset + wifi ---
+  const int16_t rightX = 380;
+
+  // Moon phase
+  moonData_t moon;
+  int mYear = haveTime ? timeinfo.tm_year + 1900 : 2025;
+  int32_t mMonth = haveTime ? timeinfo.tm_mon + 1 : 1;
+  int32_t mDay = haveTime ? timeinfo.tm_mday : 1;
+  double mHour = haveTime ? timeinfo.tm_hour + 0.1 : 12.0;
+  moon = s_moonP.getPhase(mYear, mMonth, mDay, mHour);
+  const unsigned char *moonBm = moonBitmap(moon.angle, moon.percentLit);
+  // 61x61 moon bitmap, top-right
+  canvas->drawBitmap(rightX, 5, moonBm, 61, 61, 0xFFFF); // white moon
+
+  // Sunrise/sunset via Dusk2Dawn
+  // ponytail: LATITUDE/LONGITUDE are strings in config.h (decimal degrees).
+  // Dusk2Dawn takes float lat, float lon, float tz (hours).
+  float lat = String(LATITUDE).toFloat();
+  float lon = String(LONGITUDE).toFloat();
+  // Derive timezone offset from the local-vs-UTC offset the C library knows.
+  float tzOffset = 0;
+  if (haveTime) {
+    time_t now = mktime(&timeinfo);
+    struct tm utc;
+    gmtime_r(&now, &utc);
+    tzOffset = (float)(timeinfo.tm_hour - utc.tm_hour) +
+               (float)(timeinfo.tm_min - utc.tm_min) / 60.0f;
+    // Handle day-wrap: if local is a day ahead, subtract 24; if behind, add 24
+    if (tzOffset > 12)  tzOffset -= 24;
+    if (tzOffset < -12) tzOffset += 24;
+  }
+
+  Dusk2Dawn d2d(lat, lon, tzOffset);
+  int sr = -1, ss = -1;
+  if (haveTime) {
+    sr = d2d.sunrise(timeinfo.tm_year + 1900, timeinfo.tm_mon + 1,
+                     timeinfo.tm_mday, false);
+    ss = d2d.sunset(timeinfo.tm_year + 1900, timeinfo.tm_mon + 1,
+                    timeinfo.tm_mday, false);
+  }
+
+  // Sun arc: arrow position between sunrise and sunset
+  const uint16_t SUN_COLOR = 0xFD20; // orange
+  const uint16_t SUN_LABEL_COLOR = 0xBDF7; // light blue-white
+
+  if (sr >= 0 && ss >= 0) {
+    int nowMin = timeinfo.tm_hour * 60 + timeinfo.tm_min;
+    // Arrow position along a 60px arc
+    int arcX = rightX + 5;
+    int arcY = 75; // below the moon
+    int arcW = 120; // arc width
+    int tk = (nowMin - sr) * 60 / (ss - sr);
+    if (nowMin > ss) tk = 60;
+    else if (nowMin < sr) tk = 0;
+    // Draw arc baseline
+    canvas->drawLine(arcX, arcY + 30, arcX + arcW, arcY + 30, 0x4208);
+    // Arrow at position
+    int arrowX = arcX + (arcW * tk) / 60;
+    canvas->drawBitmap(arrowX - 1, arcY + 25, arr, 3, 5, SUN_COLOR);
+
+    // Sunrise time (HH:MM) in tiny 3x5 digits
+    int srH = sr / 60;
+    int srM = sr % 60;
+    int ssH = ss / 60;
+    int ssM = ss % 60;
+
+    // Label + time for sunrise (left of arc)
+    dotText(canvas, "SR", arcX, arcY + 40, 1, LABEL_COLOR);
+    drawTinyDigits(canvas, srH, 2, arcX + 14, arcY + 40, SUN_LABEL_COLOR);
+    canvas->drawPixel(arcX + 14 + 2 * (3 + 1), arcY + 43, SUN_LABEL_COLOR);
+    canvas->drawPixel(arcX + 14 + 2 * (3 + 1), arcY + 45, SUN_LABEL_COLOR);
+    drawTinyDigits(canvas, srM, 2, arcX + 14 + 2 * (3 + 1) + 2,
+                   arcY + 40, SUN_LABEL_COLOR);
+
+    // Label + time for sunset (right of arc)
+    dotText(canvas, "SS", arcX + arcW - 50, arcY + 40, 1, LABEL_COLOR);
+    drawTinyDigits(canvas, ssH, 2, arcX + arcW - 50 + 14, arcY + 40,
+                   SUN_LABEL_COLOR);
+    canvas->drawPixel(arcX + arcW - 50 + 14 + 2 * (3 + 1), arcY + 43,
+                       SUN_LABEL_COLOR);
+    canvas->drawPixel(arcX + arcW - 50 + 14 + 2 * (3 + 1), arcY + 45,
+                       SUN_LABEL_COLOR);
+    drawTinyDigits(canvas, ssM, 2,
+                   arcX + arcW - 50 + 14 + 2 * (3 + 1) + 2, arcY + 40,
+                   SUN_LABEL_COLOR);
+  } else {
+    dotText(canvas, "Sun: N/A", rightX, 80, 1, LABEL_COLOR);
+  }
+
+  // WiFi status indicator (bottom-right)
+  bool wifiOn = (WiFi.status() == WL_CONNECTED);
+  canvas->drawBitmap(rightX + 50, 175, wifiOn ? wifi : wifioff, 25, 18,
+                     wifiOn ? 0x07E0 : 0x7BEF);
 
   // Push buffer to display
   pushToDisplay();
