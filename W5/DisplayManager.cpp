@@ -949,8 +949,8 @@ void DisplayManager::drawWeatherScreen() {
     drawText7seg(canvas, buf, x - 6, labelY, 1, 0x7BEF); // gray, size 1
   }
 
-  // --- Legend + location (single row at y=210) ---
-  const int16_t legendY = 210;
+  // --- Legend + location (single row at y=218) ---
+  const int16_t legendY = 218;
   // Precipitation swatch
   canvas->fillRect(10, legendY, 12, 12, PRECIP_COLOR);
   drawText7seg(canvas, "Rain", 28, legendY - 2, 1, 0x7BEF);
