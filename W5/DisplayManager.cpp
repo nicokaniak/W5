@@ -382,7 +382,9 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
   int16_t yx = dbX + (dateBlockW - yearW) / 2;
   drawSmallDigits(canvas, year, 4, yx, dbY + SDH + 4, DATE_COLOR);
 
-  // --- Battery icon (32x32) top-right corner, left of moon ---
+  // --- Top-right corner: wifi icon + battery icon ---
+  // Wifi (25x18) to the left of the battery (32x32), both at the top-right.
+  bool wifiOn = (WiFi.status() == WL_CONNECTED);
   int batPct = BatteryManager::getPercentage();
   uint8_t batIw = 0, batIh = 0;
   const unsigned char *batIcon = batteryIconBitmap(batPct, &batIw, &batIh);
@@ -390,14 +392,23 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
   if (batPct > 50)      batCol = 0x07E0; // green
   else if (batPct > 20) batCol = 0xFFE0; // yellow
   else                 batCol = 0xF800; // red
+  const int16_t topRightMargin = 4;
+  int16_t batX = canvas->width() - batIw - topRightMargin;
+  int16_t topIconY = topRightMargin;
   if (batIcon) {
-    // Far top-right corner of the screen, 4px margin.
-    canvas->drawBitmap(canvas->width() - batIw - 4, 4, batIcon, batIw, batIh,
-                       batCol);
+    canvas->drawBitmap(batX, topIconY, batIcon, batIw, batIh, batCol);
   }
+  // Wifi icon to the left of the battery, vertically centered with it.
+  const int WIFI_W = 25, WIFI_H = 18;
+  int16_t wifiX = batX - WIFI_W - 6;
+  int16_t wifiY = topIconY + (batIh - WIFI_H) / 2;
+  canvas->drawBitmap(wifiX, wifiY, wifiOn ? wifi : wifioff, WIFI_W, WIFI_H,
+                     wifiOn ? 0x07E0 : 0x7BEF);
 
-  // --- Right column: moon phase + sunrise/sunset + wifi + temp ---
+  // --- Right column: moon phase + sunrise/sunset + temp ---
+  // Dropped ~40px to clear the wifi/battery icons in the top-right corner.
   const int16_t rightX = 380;
+  const int16_t rightTopY = 45; // was 5, now below the top-right icons
 
   // Moon phase (61x61, top of right column)
   moonData_t moon;
@@ -407,7 +418,7 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
   double mHour = haveTime ? timeinfo.tm_hour + 0.1 : 12.0;
   moon = s_moonP.getPhase(mYear, mMonth, mDay, mHour);
   const unsigned char *moonBm = moonBitmap(moon.angle, moon.percentLit);
-  canvas->drawBitmap(rightX, 5, moonBm, 61, 61, 0xFFFF); // white moon
+  canvas->drawBitmap(rightX, rightTopY, moonBm, 61, 61, 0xFFFF); // white moon
 
   // Sunrise/sunset via Dusk2Dawn
   float lat = String(LATITUDE).toFloat();
@@ -438,7 +449,7 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
   if (sr >= 0 && ss >= 0) {
     int nowMin = timeinfo.tm_hour * 60 + timeinfo.tm_min;
     int arcX = rightX + 5;
-    int arcY = 75;
+    int arcY = 115; // was 75, dropped 40px to clear top-right icons
     int arcW = 120;
     int tk = (nowMin - sr) * 60 / (ss - sr);
     if (nowMin > ss) tk = 60;
@@ -468,7 +479,7 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
                    arcX + arcW - 50 + 14 + 2 * (3 + 1) + 2, arcY + 40,
                    SUN_LABEL_COLOR);
   } else {
-    dotText(canvas, "Sun: N/A", rightX, 80, 1, LABEL_COLOR);
+    dotText(canvas, "Sun: N/A", rightX, 120, 1, LABEL_COLOR);
   }
 
   // Temperature (yellow, below sun arc)
@@ -476,25 +487,20 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
   String tempStr = WeatherManager::getTemperature();
   bool tempValid = tempStr.length() > 0 && isDigit(tempStr.charAt(0));
   if (tempValid) {
-    dotText(canvas, "T:", rightX, 130, 2, LABEL_COLOR);
+    dotText(canvas, "T:", rightX, 170, 2, LABEL_COLOR);
     int dotPos = tempStr.indexOf('.');
     int tempInt = (dotPos > 0) ? tempStr.substring(0, dotPos).toInt()
                                 : tempStr.toInt();
     if (tempInt < 0) {
-      dotText(canvas, "-", rightX + 24, 130, 2, TEMP_COLOR);
-      drawSmallDigits(canvas, -tempInt, 2, rightX + 44, 130, TEMP_COLOR);
+      dotText(canvas, "-", rightX + 24, 170, 2, TEMP_COLOR);
+      drawSmallDigits(canvas, -tempInt, 2, rightX + 44, 170, TEMP_COLOR);
     } else {
-      drawSmallDigits(canvas, tempInt, 2, rightX + 24, 130, TEMP_COLOR);
+      drawSmallDigits(canvas, tempInt, 2, rightX + 24, 170, TEMP_COLOR);
     }
-    dotText(canvas, "C", rightX + 2 * (16 + 3) + 44, 130, 2, TEMP_COLOR);
+    dotText(canvas, "C", rightX + 2 * (16 + 3) + 44, 170, 2, TEMP_COLOR);
   } else {
-    dotText(canvas, "T:--", rightX, 130, 2, LABEL_COLOR);
+    dotText(canvas, "T:--", rightX, 170, 2, LABEL_COLOR);
   }
-
-  // WiFi status indicator (bottom-right)
-  bool wifiOn = (WiFi.status() == WL_CONNECTED);
-  canvas->drawBitmap(rightX + 50, 175, wifiOn ? wifi : wifioff, 25, 18,
-                     wifiOn ? 0x07E0 : 0x7BEF);
 
   // Push buffer to display
   pushToDisplay();
