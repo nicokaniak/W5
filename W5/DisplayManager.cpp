@@ -406,9 +406,10 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
                      wifiOn ? 0x07E0 : 0x7BEF);
 
   // --- Right column: moon phase + sunrise/sunset + temp ---
-  // Moved right and down, scaled up to fill the dead space.
-  // Moon 61x61 at scale 2 = 122x122. Right column x=408, ends at 530 (fits 536).
-  const int16_t rightX = 408;
+  // Moon 61x61 at scale 2 = 122x122. x=414, ends at 536 (fits screen).
+  // SR/SS times are stacked vertically in the dead space between clock
+  // (ends ~332) and moon (starts 414), below the moon's vertical extent.
+  const int16_t rightX = 414;
   const int MOON_SCALE = 2;
   const int MOON_NATIVE = 61;
   const int MOON_SIZE = MOON_NATIVE * MOON_SCALE; // 122
@@ -452,7 +453,8 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
   const uint16_t SUN_COLOR = 0xFD20; // orange
   const uint16_t SUN_LABEL_COLOR = 0xBDF7; // light blue-white
 
-  // Sun arc below the moon. Moon ends at moonY+122=162. Arc starts at 170.
+  // Sun arc below the moon (progress indicator only, no text labels).
+  // SR/SS times are stacked vertically in the dead space to the left.
   if (sr >= 0 && ss >= 0) {
     int nowMin = timeinfo.tm_hour * 60 + timeinfo.tm_min;
     int arcX = rightX;
@@ -461,53 +463,58 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
     int tk = (nowMin - sr) * 60 / (ss - sr);
     if (nowMin > ss) tk = 60;
     else if (nowMin < sr) tk = 0;
-    // Arc baseline
     canvas->drawLine(arcX, arcY, arcX + arcW, arcY, 0x4208);
-    // Arrow at position (scaled 2x: 3x5 → 6x10)
     int arrowX = arcX + (arcW * tk) / 60;
     drawBitmapScaled(canvas, arrowX - 3, arcY - 12, arr, 3, 5, 2, SUN_COLOR);
 
     int srH = sr / 60, srM = sr % 60;
     int ssH = ss / 60, ssM = ss % 60;
 
-    // Sunrise/sunset times using small 7-seg digits (16x25) instead of tiny
-    dotText(canvas, "SR", arcX, arcY + 6, 1, LABEL_COLOR);
-    drawSmallDigits(canvas, srH, 2, arcX + 14, arcY + 6, SUN_LABEL_COLOR);
-    // colon dots between HH and MM
-    int16_t srColonX = arcX + 14 + 2 * (16 + 3);
-    canvas->fillCircle(srColonX, arcY + 6 + 8, 2, SUN_LABEL_COLOR);
-    canvas->fillCircle(srColonX, arcY + 6 + 16, 2, SUN_LABEL_COLOR);
-    drawSmallDigits(canvas, srM, 2, srColonX + 4, arcY + 6, SUN_LABEL_COLOR);
+    // SR/SS times stacked vertically in the dead space (x≈334-414, y>162).
+    // Each row: label above, HH:MM below. Small 7-seg digits (16x25).
+    const int16_t ssX = 334;       // left edge of stacked times
+    const int16_t srLabelY = 162;
+    const int16_t srTimeY  = 172;  // digits end at 197
+    const int16_t ssLabelY = 202;
+    const int16_t ssTimeY  = 212;  // digits end at 237
 
-    dotText(canvas, "SS", arcX + arcW - 60, arcY + 6, 1, LABEL_COLOR);
-    drawSmallDigits(canvas, ssH, 2, arcX + arcW - 60 + 14, arcY + 6,
-                    SUN_LABEL_COLOR);
-    int16_t ssColonX = arcX + arcW - 60 + 14 + 2 * (16 + 3);
-    canvas->fillCircle(ssColonX, arcY + 6 + 8, 2, SUN_LABEL_COLOR);
-    canvas->fillCircle(ssColonX, arcY + 6 + 16, 2, SUN_LABEL_COLOR);
-    drawSmallDigits(canvas, ssM, 2, ssColonX + 4, arcY + 6, SUN_LABEL_COLOR);
+    // SR
+    dotText(canvas, "SR", ssX + 30, srLabelY, 1, LABEL_COLOR);
+    drawSmallDigits(canvas, srH, 2, ssX, srTimeY, SUN_LABEL_COLOR);
+    int16_t srColonX = ssX + 2 * (16 + 3);
+    canvas->fillCircle(srColonX, srTimeY + 8, 2, SUN_LABEL_COLOR);
+    canvas->fillCircle(srColonX, srTimeY + 16, 2, SUN_LABEL_COLOR);
+    drawSmallDigits(canvas, srM, 2, srColonX + 4, srTimeY, SUN_LABEL_COLOR);
+
+    // SS
+    dotText(canvas, "SS", ssX + 30, ssLabelY, 1, LABEL_COLOR);
+    drawSmallDigits(canvas, ssH, 2, ssX, ssTimeY, SUN_LABEL_COLOR);
+    int16_t ssColonX = ssX + 2 * (16 + 3);
+    canvas->fillCircle(ssColonX, ssTimeY + 8, 2, SUN_LABEL_COLOR);
+    canvas->fillCircle(ssColonX, ssTimeY + 16, 2, SUN_LABEL_COLOR);
+    drawSmallDigits(canvas, ssM, 2, ssColonX + 4, ssTimeY, SUN_LABEL_COLOR);
   } else {
-    dotText(canvas, "Sun: N/A", rightX, 175, 1, LABEL_COLOR);
+    dotText(canvas, "Sun: N/A", 340, 180, 1, LABEL_COLOR);
   }
 
-  // Temperature (yellow, below sun arc labels)
+  // Temperature (yellow, between sun arc and SS time, right column)
   const uint16_t TEMP_COLOR = 0xFFE0;
   String tempStr = WeatherManager::getTemperature();
   bool tempValid = tempStr.length() > 0 && isDigit(tempStr.charAt(0));
   if (tempValid) {
-    dotText(canvas, "T:", rightX, 210, 2, LABEL_COLOR);
+    dotText(canvas, "T:", rightX, 185, 2, LABEL_COLOR);
     int dotPos = tempStr.indexOf('.');
     int tempInt = (dotPos > 0) ? tempStr.substring(0, dotPos).toInt()
                                 : tempStr.toInt();
     if (tempInt < 0) {
-      dotText(canvas, "-", rightX + 24, 210, 2, TEMP_COLOR);
-      drawSmallDigits(canvas, -tempInt, 2, rightX + 44, 210, TEMP_COLOR);
+      dotText(canvas, "-", rightX + 24, 185, 2, TEMP_COLOR);
+      drawSmallDigits(canvas, -tempInt, 2, rightX + 44, 185, TEMP_COLOR);
     } else {
-      drawSmallDigits(canvas, tempInt, 2, rightX + 24, 210, TEMP_COLOR);
+      drawSmallDigits(canvas, tempInt, 2, rightX + 24, 185, TEMP_COLOR);
     }
-    dotText(canvas, "C", rightX + 2 * (16 + 3) + 44, 210, 2, TEMP_COLOR);
+    dotText(canvas, "C", rightX + 2 * (16 + 3) + 44, 185, 2, TEMP_COLOR);
   } else {
-    dotText(canvas, "T:--", rightX, 210, 2, LABEL_COLOR);
+    dotText(canvas, "T:--", rightX, 185, 2, LABEL_COLOR);
   }
 
   // Push buffer to display
