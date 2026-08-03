@@ -5,6 +5,7 @@
 #include "WeatherManager.h"
 #include <WiFi.h>
 #include <WiFiManager.h>
+#include <Preferences.h> // ESP32 NVS — in Arduino-ESP32 core, no external dep
 
 // ponytail: WiFiManager must be installed for on-device Wi-Fi setup. In Arduino IDE
 // use the Library Manager; in PlatformIO add tzapu/WiFiManager to lib_deps.
@@ -15,10 +16,15 @@ static WiFiManager wifiManager;
 static const char* MENU_ITEMS[] = { "Watch", "Stopwatch", "Weather", "Config" };
 static const uint8_t NUM_ITEMS = 4;
 
-// ponytail: config sub-menu. Currently one item; the UI and handler are sized for
-// a small vertical list, but adding items only requires extending this array.
-static const char* CONFIG_ITEMS[] = { "Setup Wi-Fi" };
-static const uint8_t NUM_CONFIG_ITEMS = 1;
+// ponytail: config sub-menu. Adding items only requires extending this array;
+// the handler dispatches by index below. Index 0 = Wi-Fi portal, 1 = style picker.
+static const char* CONFIG_ITEMS[] = { "Setup Wi-Fi", "Menu Style" };
+static const uint8_t NUM_CONFIG_ITEMS = 2;
+
+// ponytail: rotary menu visual styles. Keep in sync with MenuStyle enum (header).
+static const char* MENU_STYLE_LABELS[] = { "HUD", "HOLO", "DATA", "MINIMAL" };
+static_assert(sizeof(MENU_STYLE_LABELS)/sizeof(MENU_STYLE_LABELS[0]) == MENU_STYLE_COUNT,
+              "MENU_STYLE_LABELS must match MenuStyle enum");
 
 // Compile-time guard: a config screen with zero items would be a broken state.
 static_assert(NUM_CONFIG_ITEMS > 0, "config menu must have at least one item");
@@ -32,6 +38,8 @@ uint8_t  MenuManager::_configIndex   = 0;
 bool     MenuManager::_animating     = false;
 int8_t   MenuManager::_scrollDir     = 0;
 uint32_t MenuManager::_animStartTime = 0;
+MenuStyle MenuManager::_menuStyle       = STYLE_HUD;
+MenuStyle MenuManager::_stylePickerIndex = STYLE_HUD;
 
 void MenuManager::init() {
   _mode = MODE_WATCH;
@@ -40,6 +48,14 @@ void MenuManager::init() {
   _configIndex = 0;
   _animating = false;
   _scrollDir = 0;
+  // Load persisted menu style from NVS. Default STYLE_HUD if unset/invalid.
+  Preferences prefs;
+  prefs.begin("w5", true); // read-only
+  uint8_t s = prefs.getUChar("mstyle", (uint8_t)STYLE_HUD);
+  prefs.end();
+  if (s >= MENU_STYLE_COUNT) s = (uint8_t)STYLE_HUD;
+  _menuStyle = (MenuStyle)s;
+  _stylePickerIndex = _menuStyle;
 }
 
 AppMode   MenuManager::currentMode()    { return _mode; }
@@ -66,6 +82,24 @@ const char* MenuManager::configItemLabel(uint8_t i) {
 }
 
 uint8_t MenuManager::configSelectedIndex() { return _configIndex; }
+
+MenuStyle MenuManager::menuStyle()          { return _menuStyle; }
+MenuStyle MenuManager::menuStylePickerIndex() { return _stylePickerIndex; }
+uint8_t   MenuManager::menuStyleCount()     { return MENU_STYLE_COUNT; }
+const char* MenuManager::menuStyleLabel(uint8_t i) {
+  if (i >= MENU_STYLE_COUNT) return "";
+  return MENU_STYLE_LABELS[i];
+}
+
+void MenuManager::setMenuStyle(MenuStyle s) {
+  if ((uint8_t)s >= MENU_STYLE_COUNT) return;
+  _menuStyle = s;
+  Preferences prefs;
+  prefs.begin("w5", false); // read-write
+  prefs.putUChar("mstyle", (uint8_t)s);
+  prefs.end();
+  Serial.printf("MENU: style set -> %u (%s)\n", (uint8_t)s, MENU_STYLE_LABELS[s]);
+}
 
 bool MenuManager::isAnimating() { return _animating; }
 int8_t MenuManager::scrollDir() { return _scrollDir; }
@@ -103,6 +137,11 @@ void MenuManager::handleEvent(ButtonEvent evt) {
     _scrollDir = 0;
     if (_mode == MODE_MENU) {
       _mode = MODE_WATCH;
+    } else if (_mode == MODE_MENU_STYLE) {
+      // Exit style picker back to config sub-menu (discard unapplied cursor).
+      _stylePickerIndex = _menuStyle;
+      _mode = MODE_CONFIG;
+      _configIndex = 1; // land back on "Menu Style"
     } else if (_mode == MODE_CONFIG) {
       // Exit config sub-menu back to the main Config item.
       _mode = MODE_MENU;
@@ -123,6 +162,34 @@ void MenuManager::handleEvent(ButtonEvent evt) {
     return;
   }
 
+  // Menu style picker sub-screen.
+  if (_mode == MODE_MENU_STYLE) {
+    switch (evt) {
+      case EVENT_TOP_CLICK:
+        _stylePickerIndex = (MenuStyle)((_stylePickerIndex + 1) % MENU_STYLE_COUNT);
+        _dirty = true;
+        Serial.printf("STYLE: cursor -> %u (%s)\n", (uint8_t)_stylePickerIndex,
+                      MENU_STYLE_LABELS[_stylePickerIndex]);
+        break;
+      case EVENT_BOTTOM_CLICK:
+        _stylePickerIndex = (MenuStyle)((_stylePickerIndex + MENU_STYLE_COUNT - 1) % MENU_STYLE_COUNT);
+        _dirty = true;
+        Serial.printf("STYLE: cursor -> %u (%s)\n", (uint8_t)_stylePickerIndex,
+                      MENU_STYLE_LABELS[_stylePickerIndex]);
+        break;
+      case EVENT_TOP_DOUBLE_CLICK:
+        // Apply + exit to main menu so the user sees the new style live.
+        setMenuStyle(_stylePickerIndex);
+        _mode = MODE_MENU;
+        _selectedIndex = NUM_ITEMS - 1; // land on Config item
+        _dirty = true;
+        Serial.printf("STYLE: applied %u, mode -> MENU\n", (uint8_t)_stylePickerIndex);
+        break;
+      default: break;
+    }
+    return;
+  }
+
   // Config sub-menu handling.
   if (_mode == MODE_CONFIG) {
     switch (evt) {
@@ -137,7 +204,15 @@ void MenuManager::handleEvent(ButtonEvent evt) {
         Serial.printf("CONFIG: scroll -> %u (%s)\n", _configIndex, CONFIG_ITEMS[_configIndex]);
         break;
       case EVENT_TOP_DOUBLE_CLICK:
-        runWifiPortal();
+        if (_configIndex == 0) {
+          runWifiPortal();
+        } else if (_configIndex == 1) {
+          // Open the menu style picker; cursor starts at the current style.
+          _stylePickerIndex = _menuStyle;
+          _mode = MODE_MENU_STYLE;
+          _dirty = true;
+          Serial.println("CONFIG: open style picker");
+        }
         break;
       default: break;
     }

@@ -1380,89 +1380,26 @@ void DisplayManager::drawStopwatch() {
   pushToDisplay();
 }
 
-// Draw one menu item at a given angle on the arc. closeness (0..1) controls
-// visual prominence: 1.0 = selected (large, white, bright dot), 0.0 = tiny, dim, blurred.
-static void drawMenuItem(GFXcanvas16 *c, int16_t cx, int16_t cy, int16_t r,
-                         float angleDeg, uint8_t labelIdx, float closeness) {
-  if (closeness < 0.0f) closeness = 0.0f;
-  if (closeness > 1.0f) closeness = 1.0f;
+// ===== Rotary menu — multi-style renderer =====
+// ponytail: four visual styles share the same scroll math + label/icon rendering;
+// each style owns its background, dot treatment, and ambient overlay. Style is
+// selected at runtime via the CONFIG sub-menu and persisted in NVS. All styles
+// use millis()-driven ambient animation (pulse/sweep/scanlines/flicker), so the
+// main loop redraws MODE_MENU at ~20fps even when idle (see W5.ino).
 
-  float a = angleDeg * M_PI / 180.0f;
-  int16_t ax = cx + (int16_t)(r * cosf(a));
-  int16_t ay = cy + (int16_t)(r * sinf(a));
+// Shared geometry: half-arc hugging the left edge, vertically centered.
+static const int16_t MENU_CX = 0;
+static const int16_t MENU_CY = 120;  // canvas->height()/2 at 536x240
+static const int16_t MENU_R  = 115;
 
-  // Dot: grows from r=2 (very dim) to r=6 (bright cyan) as it approaches center
-  uint16_t dotColor = lerp565(0x2104, 0x07FF, closeness);
-  uint8_t  dotRad   = 2 + (uint8_t)(closeness * 4.0f + 0.5f);
-  c->fillCircle(ax, ay, dotRad, dotColor);
+// One item's computed position along the arc.
+struct MenuItemPos { float angle; uint8_t idx; float closeness; };
 
-  String label(MenuManager::menuItemLabel(labelIdx));
-
-  // ponytail: three visual tiers based on closeness to center.
-  //   closeness >= 0.6: SELECTED — size 6, white, left-anchored at arc point
-  //   closeness >= 0.25: NEAR — size 4, medium gray, left-anchored
-  //   closeness < 0.25: FAR — size 2, very dim, simulated blur via 3x offset draw
-  // Text is left-anchored at the arc point and extends toward the outer edge
-  // (rightward) so the block reads as screen-centered, not arc-centered.
-  // The blur is faked by printing the text 3 times with 1px offsets in a dim color.
-  // Cheap (3 print calls instead of 1) but reads as "out of focus" on AMOLED.
-  bool isSelected = (closeness >= 0.6f);
-  bool isFar      = (closeness < 0.25f);
-
-  uint8_t  textSize = isSelected ? 6 : (isFar ? 2 : 4);
-  uint16_t textCol  = lerp565(0x4208, 0xFFFF, closeness);  // very dark gray -> white
-
-  uint16_t w, h;
-  text7segBounds(label.c_str(), textSize, &w, &h);
-  int16_t tx = ax;            // left-anchored at arc point, extends toward outer edge
-  int16_t ty = ay - (int16_t)h / 2;
-
-  if (isFar) {
-    // ponytail: fake blur — draw 3 copies at 1px offsets in a dimmer color.
-    // No real Gaussian blur in Adafruit_GFX; this is the cheapest approximation.
-    // Icons skipped on far tier — bitmaps don't fake-blur, and they'd read as
-    // a hard dot next to soft text.
-    uint16_t blurCol = lerp565(0x2104, 0x4208, closeness * 4.0f);  // very dim
-    drawText7seg(c, label.c_str(), tx,     ty,     textSize, blurCol);
-    drawText7seg(c, label.c_str(), tx + 1, ty,     textSize, blurCol);
-    drawText7seg(c, label.c_str(), tx,     ty + 1, textSize, blurCol);
-  } else {
-    drawText7seg(c, label.c_str(), tx, ty, textSize, textCol);
-
-    // Icon to the right of the text. Size matches the text tier:
-    //   selected (size 6, 48px tall) -> 48x48 icon
-    //   near      (size 4, 32px tall) -> 32x32 icon
-    // Recolored with the same textCol so it dims/brightens with the carousel.
-    uint8_t iconSize = isSelected ? 48 : 32;
-    uint8_t iw = 0, ih = 0;
-    const unsigned char *bm = menuIconBitmap(labelIdx, iconSize, &iw, &ih);
-    if (bm) {
-      int16_t iconX = tx + (int16_t)w + 4;  // 4px gap after text
-      int16_t iconY = ay - (int16_t)ih / 2; // vertically centered on arc point
-      c->drawBitmap(iconX, iconY, bm, iw, ih, textCol);
-    }
-  }
-}
-
-void DisplayManager::drawMenu(uint8_t selectedIndex, int8_t scrollDir, float t) {
-  if (!canvas)
-    return;
-
-  canvas->fillScreen(0x0000);
-
-  // Half-circle arc: center on LEFT edge, vertically centered, 3px thick bright cyan
-  const int16_t cx = 0;
-  const int16_t cy = canvas->height() / 2;   // 120
-  const int16_t r  = 115;
-  const uint16_t arcColor = 0x07FF;
-  canvas->drawCircle(cx, cy, r - 1, arcColor);
-  canvas->drawCircle(cx, cy, r,     arcColor);
-  canvas->drawCircle(cx, cy, r + 1, arcColor);
-
-  const uint8_t count = MenuManager::menuItemCount();
-
+// Compute the visible items for the current scroll state. Returns count written.
+// Static (scrollDir==0): 3 items at -60/0/+60. Animated: up to 4 sliding items.
+static int computeMenuItems(uint8_t selectedIndex, int8_t scrollDir, float t,
+                            uint8_t count, MenuItemPos out[4]) {
   if (scrollDir == 0) {
-    // Static: 3 items at -60, 0, +60 degrees
     float angles[3] = { -60.0f, 0.0f, 60.0f };
     uint8_t idx[3] = {
       (uint8_t)((selectedIndex + count - 1) % count),
@@ -1470,49 +1407,367 @@ void DisplayManager::drawMenu(uint8_t selectedIndex, int8_t scrollDir, float t) 
       (uint8_t)((selectedIndex + 1) % count)
     };
     for (int i = 0; i < 3; i++) {
-      float close = (i == 1) ? 1.0f : 0.0f;
-      drawMenuItem(canvas, cx, cy, r, angles[i], idx[i], close);
+      out[i].angle = angles[i];
+      out[i].idx = idx[i];
+      out[i].closeness = (i == 1) ? 1.0f : 0.0f;
     }
+    return 3;
+  }
+  // Animated: 4 items slide along the arc (see original comments in drawMenu).
+  float shift = -scrollDir * 60.0f * t;
+  uint8_t itemIdx[4];
+  float baseAngles[4];
+  if (scrollDir > 0) {
+    itemIdx[0] = (selectedIndex + count - 2) % count;
+    itemIdx[1] = (selectedIndex + count - 1) % count;
+    itemIdx[2] = selectedIndex;
+    itemIdx[3] = (selectedIndex + 1) % count;
+    baseAngles[0] = -60; baseAngles[1] = 0; baseAngles[2] = 60; baseAngles[3] = 120;
   } else {
-    // Animated: 4 items slide along the arc.
-    // scrollDir=+1 (down): items move UP (angles decrease). The item that was
-    //   BELOW (next) slides up to center, old selected slides up to top.
-    //   New item enters from below. Like scrolling a list down.
-    // scrollDir=-1 (up): items move DOWN (angles increase). The item that was
-    //   ABOVE (prev) slides down to center, old selected slides down to bottom.
-    //   New item enters from above. Like scrolling a list up.
-    float shift = -scrollDir * 60.0f * t;
+    itemIdx[0] = (selectedIndex + count - 1) % count;
+    itemIdx[1] = selectedIndex;
+    itemIdx[2] = (selectedIndex + 1) % count;
+    itemIdx[3] = (selectedIndex + 2) % count;
+    baseAngles[0] = -120; baseAngles[1] = -60; baseAngles[2] = 0; baseAngles[3] = 60;
+  }
+  int n = 0;
+  for (int i = 0; i < 4; i++) {
+    float angle = baseAngles[i] + shift;
+    if (angle < -95.0f || angle > 95.0f) continue;
+    out[n].angle = angle;
+    out[n].idx = itemIdx[i];
+    out[n].closeness = 1.0f - fabs(angle) / 60.0f;
+    n++;
+  }
+  return n;
+}
 
-    uint8_t itemIdx[4];
-    float baseAngles[4];
-
-    if (scrollDir > 0) {
-      // Scrolling down: items slide UP. New selected enters from BELOW.
-      // [oldPrev, oldSel, newSel, newNext] at [-60, 0, +60, +120]
-      itemIdx[0] = (selectedIndex + count - 2) % count;    // old prev (slides off top)
-      itemIdx[1] = (selectedIndex + count - 1) % count;    // old selected (moves to top)
-      itemIdx[2] = selectedIndex;                          // new selected (moves to center from below)
-      itemIdx[3] = (selectedIndex + 1) % count;            // new next (enters from bottom)
-      baseAngles[0] = -60; baseAngles[1] = 0; baseAngles[2] = 60; baseAngles[3] = 120;
-    } else {
-      // Scrolling up: items slide DOWN. New selected enters from ABOVE.
-      // [newPrev, newSel, oldSel, oldNext] at [-120, -60, 0, +60]
-      itemIdx[0] = (selectedIndex + count - 1) % count;    // new prev (enters from top)
-      itemIdx[1] = selectedIndex;                          // new selected (moves to center from above)
-      itemIdx[2] = (selectedIndex + 1) % count;            // old selected (moves to bottom)
-      itemIdx[3] = (selectedIndex + 2) % count;            // old next (slides off bottom)
-      baseAngles[0] = -120; baseAngles[1] = -60; baseAngles[2] = 0; baseAngles[3] = 60;
-    }
-
-    for (int i = 0; i < 4; i++) {
-      float angle = baseAngles[i] + shift;
-      // Skip items that have slid off the visible half-arc
-      if (angle < -95.0f || angle > 95.0f) continue;
-      // Closeness to center (angle 0): 1.0 at center, 0.0 at +/-60, negative beyond
-      float closeness = 1.0f - fabs(angle) / 60.0f;
-      drawMenuItem(canvas, cx, cy, r, angle, itemIdx[i], closeness);
+// Shared label + icon renderer (the 3-tier logic from the original drawMenuItem).
+// Drawn left-anchored at the arc point (ax,ay), extending toward the outer edge.
+// Far items get a faked 3-offset blur; near/selected get the icon to the right.
+static void drawMenuLabel(GFXcanvas16 *c, int16_t ax, int16_t ay,
+                          uint8_t labelIdx, float closeness) {
+  if (closeness < 0.0f) closeness = 0.0f;
+  if (closeness > 1.0f) closeness = 1.0f;
+  String label(MenuManager::menuItemLabel(labelIdx));
+  bool isSelected = (closeness >= 0.6f);
+  bool isFar      = (closeness < 0.25f);
+  uint8_t  textSize = isSelected ? 6 : (isFar ? 2 : 4);
+  uint16_t textCol  = lerp565(0x4208, 0xFFFF, closeness);
+  uint16_t w, h;
+  text7segBounds(label.c_str(), textSize, &w, &h);
+  int16_t tx = ax;
+  int16_t ty = ay - (int16_t)h / 2;
+  if (isFar) {
+    uint16_t blurCol = lerp565(0x2104, 0x4208, closeness * 4.0f);
+    drawText7seg(c, label.c_str(), tx,     ty,     textSize, blurCol);
+    drawText7seg(c, label.c_str(), tx + 1, ty,     textSize, blurCol);
+    drawText7seg(c, label.c_str(), tx,     ty + 1, textSize, blurCol);
+  } else {
+    drawText7seg(c, label.c_str(), tx, ty, textSize, textCol);
+    uint8_t iconSize = isSelected ? 48 : 32;
+    uint8_t iw = 0, ih = 0;
+    const unsigned char *bm = menuIconBitmap(labelIdx, iconSize, &iw, &ih);
+    if (bm) {
+      int16_t iconX = tx + (int16_t)w + 4;
+      int16_t iconY = ay - (int16_t)ih / 2;
+      c->drawBitmap(iconX, iconY, bm, iw, ih, textCol);
     }
   }
+}
+
+// --- Style HUD: tactical compass ---
+// Tick gauge around the arc + sweeping radar line with fading trail + reticle
+// brackets around the selected dot + "02/04" index readout top-right.
+static void drawMenuHUD(GFXcanvas16 *c, uint8_t selectedIndex, int8_t scrollDir, float t) {
+  const int16_t cx = MENU_CX, cy = MENU_CY, r = MENU_R;
+  const uint16_t arcColor = 0x07FF;
+  // base arc
+  c->drawCircle(cx, cy, r - 1, arcColor);
+  c->drawCircle(cx, cy, r,     arcColor);
+  c->drawCircle(cx, cy, r + 1, arcColor);
+  // tick gauge: every 3deg around the half-arc, majors at ±60/0
+  for (int a = -90; a <= 90; a += 3) {
+    float rad = a * M_PI / 180.0f;
+    bool major = (a % 60 == 0);
+    int16_t tickLen = major ? 12 : 5;
+    uint16_t col = major ? 0x07FF : 0x4208;
+    int16_t x0 = cx + (int16_t)((r + 4) * cosf(rad));
+    int16_t y0 = cy + (int16_t)((r + 4) * sinf(rad));
+    int16_t x1 = cx + (int16_t)((r + 4 + tickLen) * cosf(rad));
+    int16_t y1 = cy + (int16_t)((r + 4 + tickLen) * sinf(rad));
+    c->drawLine(x0, y0, x1, y1, col);
+  }
+  // radar sweep: full revolution ~4s when idle; centered during scroll.
+  // ponytail: trail faked with 5 dimmer line copies behind the sweep head —
+  // no alpha on Adafruit_GFX, so we lerp toward black for the fade.
+  float sweepDeg = (scrollDir != 0) ? 0.0f
+                  : fmodf(millis() / 22.0f, 180.0f) - 90.0f;
+  for (int k = 0; k < 5; k++) {
+    float a = (sweepDeg - k * 7.0f) * M_PI / 180.0f;
+    float intensity = (k == 0) ? 1.0f : (0.5f - k * 0.1f);
+    uint16_t col = lerp565(0x0000, 0x07FF, intensity);
+    int16_t ex = cx + (int16_t)((r + 18) * cosf(a));
+    int16_t ey = cy + (int16_t)((r + 18) * sinf(a));
+    c->drawLine(cx, cy, ex, ey, col);
+  }
+  // items
+  const uint8_t count = MenuManager::menuItemCount();
+  MenuItemPos items[4];
+  int n = computeMenuItems(selectedIndex, scrollDir, t, count, items);
+  for (int i = 0; i < n; i++) {
+    float a = items[i].angle * M_PI / 180.0f;
+    int16_t ax = cx + (int16_t)(r * cosf(a));
+    int16_t ay = cy + (int16_t)(r * sinf(a));
+    float cl = items[i].closeness;
+    bool sel = (cl >= 0.6f);
+    uint16_t dotColor = lerp565(0x2104, 0x07FF, cl);
+    uint8_t dotRad = 2 + (uint8_t)(cl * 4.0f + 0.5f);
+    if (sel) {  // pulse
+      float pulse = sinf(millis() / 200.0f) * 0.5f + 0.5f;
+      dotRad += (uint8_t)(pulse * 2.0f);
+    }
+    c->fillCircle(ax, ay, dotRad, dotColor);
+    if (sel) drawCornerBrackets(c, ax - 11, ay - 11, 22, 22, 5, 0x07FF);
+    drawMenuLabel(c, ax, ay, items[i].idx, cl);
+  }
+  // index readout top-right
+  char buf[8];
+  snprintf(buf, sizeof(buf), "%02u/%02u", selectedIndex + 1, count);
+  drawText7seg(c, buf, c->width() - 70, 8, 2, 0x07FF);
+}
+
+// Filled arc segment between two radii (no drawArc in Adafruit_GFX; faked with
+// radial lines at 2deg steps). Used by Holo for the lit selected slot.
+static void drawArcSegment(GFXcanvas16 *c, int16_t cx, int16_t cy,
+                           int16_t rInner, int16_t rOuter,
+                           float centerDeg, float halfSpanDeg, uint16_t color) {
+  for (float a = centerDeg - halfSpanDeg; a <= centerDeg + halfSpanDeg; a += 2.0f) {
+    float rad = a * M_PI / 180.0f;
+    int16_t x0 = cx + (int16_t)(rInner * cosf(rad));
+    int16_t y0 = cy + (int16_t)(rInner * sinf(rad));
+    int16_t x1 = cx + (int16_t)(rOuter * cosf(rad));
+    int16_t y1 = cy + (int16_t)(rOuter * sinf(rad));
+    c->drawLine(x0, y0, x1, y1, color);
+  }
+}
+
+// --- Style Holo: holographic ring ---
+// Double ring with lit segment at the selected slot + CRT scanlines + vertical
+// light beam from the selected dot to top/bottom edges + pulsing dot.
+static void drawMenuHolo(GFXcanvas16 *c, uint8_t selectedIndex, int8_t scrollDir, float t) {
+  const int16_t cx = MENU_CX, cy = MENU_CY, r = MENU_R;
+  const int16_t rIn = r - 8, rOut = r + 8;
+  // dim band between rings
+  drawArcSegment(c, cx, cy, rIn, rOut, 0, 90, 0x2104);
+  // ring outlines
+  c->drawCircle(cx, cy, rIn,  0x4208);
+  c->drawCircle(cx, cy, rOut, 0x4208);
+  // CRT scanlines: every 3rd row a dim horizontal line over the menu area.
+  // ponytail: cheap CRT texture — 80 drawFastHLine calls, no per-pixel work.
+  for (int16_t y = 0; y < c->height(); y += 3)
+    c->drawFastHLine(0, y, c->width(), 0x2104);
+  // items
+  const uint8_t count = MenuManager::menuItemCount();
+  MenuItemPos items[4];
+  int n = computeMenuItems(selectedIndex, scrollDir, t, count, items);
+  for (int i = 0; i < n; i++) {
+    float a = items[i].angle * M_PI / 180.0f;
+    int16_t ax = cx + (int16_t)(r * cosf(a));
+    int16_t ay = cy + (int16_t)(r * sinf(a));
+    float cl = items[i].closeness;
+    bool sel = (cl >= 0.6f);
+    // lit segment follows the selected item's angle
+    if (sel) {
+      float segCenter = items[i].angle;
+      drawArcSegment(c, cx, cy, rIn, rOut, segCenter, 22.0f, 0x07FF);
+      // vertical light beam to top & bottom edges
+      c->drawFastVLine(ax, 0, ay, 0x07FF);
+      c->drawFastVLine(ax, ay, c->height() - ay, 0x07FF);
+    }
+    // dot with pulse on selected
+    uint16_t dotColor = lerp565(0x2104, 0x07FF, cl);
+    uint8_t dotRad = 2 + (uint8_t)(cl * 4.0f + 0.5f);
+    if (sel) {
+      float pulse = sinf(millis() / 200.0f) * 0.5f + 0.5f;
+      dotRad += (uint8_t)(pulse * 2.0f);
+    }
+    c->fillCircle(ax, ay, dotRad, dotColor);
+    drawMenuLabel(c, ax, ay, items[i].idx, cl);
+  }
+}
+
+// --- Style Data: data stream ---
+// Connecting circuit trace between visible dots + per-item telemetry columns +
+// horizontal lock-on bar from the selected label to the right edge with a
+// moving highlight segment. Telemetry values flicker via millis().
+static void drawMenuData(GFXcanvas16 *c, uint8_t selectedIndex, int8_t scrollDir, float t) {
+  const int16_t cx = MENU_CX, cy = MENU_CY, r = MENU_R;
+  c->drawCircle(cx, cy, r, 0x4208);  // dim base arc
+  const uint8_t count = MenuManager::menuItemCount();
+  MenuItemPos items[4];
+  int n = computeMenuItems(selectedIndex, scrollDir, t, count, items);
+  // circuit trace: polyline connecting all visible dots (dim)
+  if (n >= 2) {
+    for (int i = 0; i < n - 1; i++) {
+      float a0 = items[i].angle * M_PI / 180.0f;
+      float a1 = items[i + 1].angle * M_PI / 180.0f;
+      int16_t x0 = cx + (int16_t)(r * cosf(a0));
+      int16_t y0 = cy + (int16_t)(r * sinf(a0));
+      int16_t x1 = cx + (int16_t)(r * cosf(a1));
+      int16_t y1 = cy + (int16_t)(r * sinf(a1));
+      c->drawLine(x0, y0, x1, y1, 0x4208);
+    }
+  }
+  // ponytail: per-item pseudo-telemetry. Values derived from millis()+idx so they
+  // flicker but stay in plausible ranges. Pure cosmetic — not real sensor data.
+  static const char* const TELE_L1[] = { "HR 72", "LAP 03", "21C",  "NVS OK" };
+  static const char* const TELE_L2[] = { "STEPS 8421", "BEST 42", "HUM 64", "VER 1.0" };
+  for (int i = 0; i < n; i++) {
+    float a = items[i].angle * M_PI / 180.0f;
+    int16_t ax = cx + (int16_t)(r * cosf(a));
+    int16_t ay = cy + (int16_t)(r * sinf(a));
+    float cl = items[i].closeness;
+    bool sel = (cl >= 0.6f);
+    bool isFar = (cl < 0.25f);
+    // dot
+    uint16_t dotColor = lerp565(0x2104, 0x07FF, cl);
+    uint8_t dotRad = 2 + (uint8_t)(cl * 4.0f + 0.5f);
+    if (sel) {
+      float pulse = sinf(millis() / 200.0f) * 0.5f + 0.5f;
+      dotRad += (uint8_t)(pulse * 2.0f);
+    }
+    c->fillCircle(ax, ay, dotRad, dotColor);
+    drawMenuLabel(c, ax, ay, items[i].idx, cl);
+    // telemetry column under the label (near/selected only)
+    if (!isFar) {
+      uint8_t idx = items[i].idx;
+      // flicker: dim/bright toggle every ~400ms, offset per item
+      bool flicker = ((millis() + idx * 137) / 400) % 2 == 0;
+      uint16_t tcol = flicker ? lerp565(0x4208, 0x07E0, cl) : 0x4208;
+      int16_t ty = ay + (sel ? 30 : 20);
+      drawText7seg(c, TELE_L1[idx], ax, ty, 1, tcol);
+      drawText7seg(c, TELE_L2[idx], ax, ty + 14, 1, 0x4208);
+    }
+    // lock-on bar from selected label to right edge with moving highlight
+    if (sel) {
+      int16_t barY = ay;
+      c->drawFastHLine(ax, barY, c->width() - ax, 0x4208);
+      // moving 30px bright segment, ~1.5s traversal
+      int16_t span = c->width() - ax;
+      int16_t segPos = (int16_t)(fmodf(millis() / 1500.0f, 1.0f) * span);
+      c->drawFastHLine(ax + segPos, barY, 30, 0x07FF);
+    }
+  }
+}
+
+// --- Style Minimal: minimal sci-fi ---
+// Marching-ants dashed arc + glow halo around selected dot + bracket-wrapped
+// selected label + subtle inner border. Subtle, lowest visual noise.
+static void drawMenuMinimal(GFXcanvas16 *c, uint8_t selectedIndex, int8_t scrollDir, float t) {
+  const int16_t cx = MENU_CX, cy = MENU_CY, r = MENU_R;
+  // marching-ants dashed arc: 4px on / 4px off, phase rotates with millis().
+  // ponytail: Adafruit_GFX has no dashed-circle, so we step around the half-arc
+  // in 2deg increments and draw short arc chords for "on" segments. ~45 calls.
+  float phase = fmodf(millis() / 400.0f, 8.0f);  // 0..8, wraps
+  for (int a = -90; a <= 90; a += 2) {
+    float pos = fmodf(a + 90 + phase, 8.0f);  // 0..8 along the dash cycle
+    if (pos >= 4.0f) continue;  // gap
+    float rad0 = a * M_PI / 180.0f;
+    float rad1 = (a + 2) * M_PI / 180.0f;
+    int16_t x0 = cx + (int16_t)(r * cosf(rad0));
+    int16_t y0 = cy + (int16_t)(r * sinf(rad0));
+    int16_t x1 = cx + (int16_t)(r * cosf(rad1));
+    int16_t y1 = cy + (int16_t)(r * sinf(rad1));
+    c->drawLine(x0, y0, x1, y1, 0x07FF);
+  }
+  // subtle inner border
+  c->drawRect(2, 2, c->width() - 4, c->height() - 4, 0x2104);
+  const uint8_t count = MenuManager::menuItemCount();
+  MenuItemPos items[4];
+  int n = computeMenuItems(selectedIndex, scrollDir, t, count, items);
+  for (int i = 0; i < n; i++) {
+    float a = items[i].angle * M_PI / 180.0f;
+    int16_t ax = cx + (int16_t)(r * cosf(a));
+    int16_t ay = cy + (int16_t)(r * sinf(a));
+    float cl = items[i].closeness;
+    bool sel = (cl >= 0.6f);
+    // glow halo: 3 concentric circles, dimmer outward (selected only)
+    if (sel) {
+      float pulse = sinf(millis() / 300.0f) * 0.5f + 0.5f;
+      c->fillCircle(ax, ay, 10 + (int16_t)(pulse * 2), 0x2104);
+      c->drawCircle(ax, ay, 9,  0x4208);
+      c->drawCircle(ax, ay, 12, 0x2104);
+    }
+    uint16_t dotColor = lerp565(0x2104, 0x07FF, cl);
+    uint8_t dotRad = 2 + (uint8_t)(cl * 4.0f + 0.5f);
+    c->fillCircle(ax, ay, dotRad, dotColor);
+    // bracket-wrapped label for selected: "( WATCH )"
+    // ponytail: 7-seg font has no []/<>, only (). We wrap the label in parens.
+    if (sel) {
+      String label(MenuManager::menuItemLabel(items[i].idx));
+      uint16_t w, h;
+      text7segBounds(label.c_str(), 6, &w, &h);
+      int16_t ty = ay - (int16_t)h / 2;
+      drawText7seg(c, "(", ax - 18, ty, 6, 0x07FF);
+      drawText7seg(c, ")", ax + (int16_t)w + 6, ty, 6, 0x07FF);
+    }
+    drawMenuLabel(c, ax, ay, items[i].idx, cl);
+  }
+}
+
+void DisplayManager::drawMenu(uint8_t selectedIndex, int8_t scrollDir, float t) {
+  if (!canvas)
+    return;
+  canvas->fillScreen(0x0000);
+  switch (MenuManager::menuStyle()) {
+    case STYLE_HUD:     drawMenuHUD(canvas, selectedIndex, scrollDir, t);     break;
+    case STYLE_HOLO:    drawMenuHolo(canvas, selectedIndex, scrollDir, t);    break;
+    case STYLE_DATA:    drawMenuData(canvas, selectedIndex, scrollDir, t);    break;
+    case STYLE_MINIMAL: drawMenuMinimal(canvas, selectedIndex, scrollDir, t); break;
+    default:            drawMenuHUD(canvas, selectedIndex, scrollDir, t);     break;
+  }
+  pushToDisplay();
+}
+
+// Menu style picker sub-screen. Lists the 4 styles; the live cursor is
+// highlighted in cyan. Title + hint at top, current applied style marked.
+void DisplayManager::drawMenuStylePicker(uint8_t pickerIndex) {
+  if (!canvas)
+    return;
+  GFXcanvas16 *c = canvas;
+  c->fillScreen(0x0000);
+
+  // Title
+  drawText7seg(c, "MENU STYLE", 10, 10, 3, 0xFFE0);  // yellow
+
+  const uint8_t count = MenuManager::menuStyleCount();
+  const MenuStyle applied = MenuManager::menuStyle();
+  const int16_t startY = 70;
+  const int16_t itemH  = 38;
+
+  for (uint8_t i = 0; i < count; i++) {
+    int16_t y = startY + i * itemH;
+    const char* label = MenuManager::menuStyleLabel(i);
+    bool sel = (i == pickerIndex);
+    bool isApplied = (i == (uint8_t)applied);
+    uint16_t col = sel ? 0x07FF : 0x7BEF;
+    uint16_t bulletCol = sel ? 0x07FF : 0x4208;
+
+    // Bullet
+    c->fillCircle(15, y + 12, 5, bulletCol);
+    // Label
+    drawText7seg(c, label, 35, y, 3, col);
+    // "(current)" marker on the applied style — small filled dot (no * glyph)
+    if (isApplied) {
+      c->fillCircle(c->width() - 14, y + 12, 4, 0xFFE0);
+    }
+    // reticle around the selected row
+    if (sel) drawCornerBrackets(c, 6, y - 4, c->width() - 12, itemH - 4, 4, 0x07FF);
+  }
+
+  // Hint
+  drawText7seg(c, "DBL CLICK APPLY   BOTH BACK", 10, c->height() - 16, 1, 0x7BEF);
 
   pushToDisplay();
 }

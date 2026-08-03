@@ -21,10 +21,16 @@ static const uint32_t WEATHER_FETCH_MS = 600000;
 // stopwatch without saturating SPI. Ceiling: cs digit jumps ~5/frame; value is
 // always exact since elapsed is computed from millis() at draw time.
 static const uint32_t STOPWATCH_REDRAW_MS = 50;
+// ponytail: ambient menu animation (radar sweep, dot pulse, scanlines, flicker)
+// runs at 20fps even when idle. Full framebuffer push (~27ms @ 75MHz SPI) caps
+// us near 30fps; 50ms is safe and reads as smooth. Ceiling: if styles grow
+// heavier per-frame draw work, drop to 15fps (66ms) before raising SPI clock.
+static const uint32_t MENU_REDRAW_MS = 50;
 
 static uint32_t lastWatchRedraw = 0;
 static uint32_t lastWeatherFetch = 0;
 static uint32_t lastStopwatchRedraw = 0;
+static uint32_t lastMenuRedraw = 0;
 
 void setup() {
   // ===== CRITICAL: ENABLE POWER FIRST - BEFORE ANYTHING ELSE =====
@@ -106,11 +112,27 @@ void loop() {
         DisplayManager::drawMenu(MenuManager::selectedIndex(),
                                  MenuManager::scrollDir(),
                                  MenuManager::animProgress());
+        lastMenuRedraw = now;
       } else if (MenuManager::consumeDirty()) {
         // Static redraw (mode entry, animation just finished, etc.)
         DisplayManager::drawMenu(MenuManager::selectedIndex());
+        lastMenuRedraw = now;
+      } else if (now - lastMenuRedraw >= MENU_REDRAW_MS) {
+        // Ambient: styles use millis()-driven effects (sweep/pulse/scanlines)
+        // that need continuous redraw even when the carousel is idle.
+        DisplayManager::drawMenu(MenuManager::selectedIndex());
+        lastMenuRedraw = now;
       }
       break;
+    case MODE_MENU_STYLE: {
+      // Style picker: redraw on change or at 20fps for the reticle/ambient feel.
+      bool force = MenuManager::consumeDirty();
+      if (force || now - lastMenuRedraw >= MENU_REDRAW_MS) {
+        DisplayManager::drawMenuStylePicker((uint8_t)MenuManager::menuStylePickerIndex());
+        lastMenuRedraw = now;
+      }
+      break;
+    }
     case MODE_STOPWATCH: {
       // Redraw on mode entry / state change, or at 20Hz while running so the
       // centiseconds tick. Idle/stopped screens are static (no periodic redraw).
