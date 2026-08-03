@@ -313,19 +313,14 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
                       timeY, SCALE, DGAP, TIME_COLOR);
 
   // --- Bottom section: date ---
+  // Layout: [DOW]  [DD.MM]   (DOW on left, date on right, two rows)
+  //                [YYYY]
+  // DOW sized to match the date block height (~54px → dot size 7 = 56px).
+  // Group pushed to the lower-left corner of the screen.
   const uint16_t DATE_COLOR = 0xBDF7; // light blue-white
   const uint16_t LABEL_COLOR = 0x7BEF; // gray
-  const int16_t dateY = 140; // below the midline
 
   String dateStr = TimeManager::getCurrentDate(); // "Mon 25/12"
-
-  // Day of week (dot text, centered in left 2/3)
-  if (dateStr.length() >= 3) {
-    String dow = dateStr.substring(0, 3); // "Mon"
-    uint16_t dowW, dowH;
-    dotTextBounds(dow.c_str(), 3, &dowW, &dowH);
-    dotText(canvas, dow.c_str(), (leftSpan - dowW) / 2, dateY, 3, DATE_COLOR);
-  }
 
   // Parse day and month from "Mon 25/12"
   int dayNum = 0, monthNum = 0;
@@ -337,30 +332,55 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
       monthNum = dateStr.substring(slashIdx + 1).toInt();
     }
   }
-
-  // Day . Month as small 7-seg digits (16x25), centered
-  if (dayNum > 0) {
-    const int SDW = 16, SDH = 25, SGAP = 4, DOTW = 6;
-    int dateRowW = 2 * SDW + DOTW + 2 * SDW + SGAP + SGAP; // DD . MM with gaps
-    int16_t dx = (leftSpan - dateRowW) / 2;
-    int16_t dy = dateY + 30;
-    drawSmallDigits(canvas, dayNum, 2, dx, dy, DATE_COLOR);
-    // separator dot
-    int16_t dotX = dx + 2 * (SDW + 3) + SGAP / 2;
-    canvas->fillCircle(dotX, dy + SDH / 2 - 3, 2, DATE_COLOR);
-    canvas->fillCircle(dotX, dy + SDH / 2 + 3, 2, DATE_COLOR);
-    drawSmallDigits(canvas, monthNum, 2, dx + 2 * (SDW + 3) + DOTW + SGAP, dy,
-                    DATE_COLOR);
-  }
-
-  // Year (4 small digits) below day/month
   int year = haveTime ? timeinfo.tm_year + 1900 : 2025;
-  {
-    const int SDW = 16, SGAP = 3;
-    int yearW = 4 * SDW + 3 * SGAP;
-    int16_t yx = (leftSpan - yearW) / 2;
-    drawSmallDigits(canvas, year, 4, yx, dateY + 60, DATE_COLOR);
+
+  // Measure both blocks.
+  const int SDW = 16, SDH = 25, SGAP = 3, DOTW = 6, DDOT_GAP = 4;
+  int dateRowW = 2 * (SDW + 3) + DOTW + 2 * (SDW + 3); // DD . MM
+  int yearW = 4 * SDW + 3 * SGAP;
+  int dateBlockW = (dateRowW > yearW) ? dateRowW : yearW;
+  int dateBlockH = SDH + 4 + SDH; // two rows of 25px + 4px gap = 54
+
+  // DOW dot text at size 7 → 8*7 = 56px tall, matches the 54px date block.
+  const uint8_t DOW_SIZE = 7;
+  uint16_t dowW = 0, dowH = 0;
+  String dow;
+  if (dateStr.length() >= 3) {
+    dow = dateStr.substring(0, 3); // "Mon"
+    dotTextBounds(dow.c_str(), DOW_SIZE, &dowW, &dowH);
   }
+
+  const int COL_GAP = 16;
+  int groupW = dowW + COL_GAP + dateBlockW;
+  // Push to lower-left: 8px left margin, 8px bottom margin.
+  int16_t groupX = 8;
+  int16_t groupY = canvas->height() - dateBlockH - 8;
+  if (groupY < 122) groupY = 122; // don't cross into top section
+
+  // DOW on the left, vertically centered with the date block
+  int16_t dowY = groupY + (dateBlockH - dowH) / 2;
+  if (dow.length()) {
+    dotText(canvas, dow.c_str(), groupX, dowY, DOW_SIZE, DATE_COLOR);
+  }
+
+  // Date block on the right of DOW
+  int16_t dbX = groupX + dowW + COL_GAP;
+  int16_t dbY = groupY;
+
+  // Row 1: DD . MM
+  if (dayNum > 0) {
+    int16_t dx = dbX + (dateBlockW - dateRowW) / 2;
+    drawSmallDigits(canvas, dayNum, 2, dx, dbY, DATE_COLOR);
+    int16_t dotX = dx + 2 * (SDW + 3) + DDOT_GAP / 2;
+    canvas->fillCircle(dotX, dbY + SDH / 2 - 3, 2, DATE_COLOR);
+    canvas->fillCircle(dotX, dbY + SDH / 2 + 3, 2, DATE_COLOR);
+    drawSmallDigits(canvas, monthNum, 2,
+                    dx + 2 * (SDW + 3) + DOTW + DDOT_GAP, dbY, DATE_COLOR);
+  }
+
+  // Row 2: YYYY
+  int16_t yx = dbX + (dateBlockW - yearW) / 2;
+  drawSmallDigits(canvas, year, 4, yx, dbY + SDH + 4, DATE_COLOR);
 
   // --- Battery icon (32x32) top-right corner, left of moon ---
   int batPct = BatteryManager::getPercentage();
