@@ -41,6 +41,9 @@ void setup() {
   delay(100);
 
   Serial.begin(115200);
+  // Start ESP32-S3 USB-Serial-JTAG CDC so bool(HWCDCSerial) reflects host
+  // connection for the charging-icon check. No-op if CDC-on-boot is on.
+  HWCDCSerial.begin();
   delay(1000);
   Serial.println("=== W5 Starting ===");
   Serial.println("Power enabled: GPIO15 + GPIO38 with GPIO hold");
