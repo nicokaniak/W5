@@ -10,6 +10,7 @@
 #include "Dusk2Dawn.h"
 #include "moonPhaser.h"
 #include "starfield_icons.h" // 7-seg digits, moon phases, am/pm, wifi (from watchy-starfield)
+#include "battery_icons.h" // 1-bit battery state icons (generated from icons/battery/*.png)
 #include "icons.h" // 1-bit PROGMEM menu icons (generated from icons/*.png)
 #include "weather_icons.h" // 1-bit PROGMEM weather icons (generated from icons/weather/*.png)
 #include "rm67162.h" // For lcd_PushColors
@@ -331,21 +332,24 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
     dotText(canvas, "T:--", midX, 100, 2, LABEL_COLOR);
   }
 
-  // Battery bar (bottom of middle column)
+  // Battery icon (state-based, 24x24) + percentage label
   int batPct = BatteryManager::getPercentage();
-  int barWidth = map(batPct, 0, 100, 0, 100);
+  uint8_t batIw = 0, batIh = 0;
+  const unsigned char *batIcon = batteryIconBitmap(batPct, &batIw, &batIh);
   const int16_t batX = midX;
-  const int16_t batY = 145;
-  canvas->fillRect(batX, batY, 100, 10, 0x4208); // dark gray background
+  const int16_t batY = 140;
+  // Color: green >50%, yellow >20%, red otherwise
   uint16_t batCol;
   if (batPct > 50)      batCol = 0x07E0; // green
   else if (batPct > 20) batCol = 0xFFE0; // yellow
   else                 batCol = 0xF800; // red
-  canvas->fillRect(batX, batY, barWidth, 10, batCol);
-  // Battery percentage label
+  if (batIcon) {
+    canvas->drawBitmap(batX, batY, batIcon, batIw, batIh, batCol);
+  }
+  // Percentage label to the right of the icon
   char batBuf[8];
   snprintf(batBuf, sizeof(batBuf), "%d%%", batPct);
-  dotText(canvas, batBuf, batX, batY + 14, 1, LABEL_COLOR);
+  dotText(canvas, batBuf, batX + batIw + 4, batY + 7, 2, LABEL_COLOR);
 
   // --- Right column: moon phase + sunrise/sunset + wifi ---
   const int16_t rightX = 380;
