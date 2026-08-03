@@ -1553,8 +1553,8 @@ static void drawArcSegment(GFXcanvas16 *c, int16_t cx, int16_t cy,
 }
 
 // --- Style Holo: holographic ring ---
-// Double ring with lit segment at the selected slot + CRT scanlines + vertical
-// light beam from the selected dot to top/bottom edges + pulsing dot.
+// Double ring with lit segment at the selected slot + CRT scanlines +
+// pulsing dot.
 static void drawMenuHolo(GFXcanvas16 *c, uint8_t selectedIndex, int8_t scrollDir, float t) {
   const int16_t cx = MENU_CX, cy = MENU_CY, r = MENU_R;
   const int16_t rIn = r - 8, rOut = r + 8;
@@ -1581,9 +1581,6 @@ static void drawMenuHolo(GFXcanvas16 *c, uint8_t selectedIndex, int8_t scrollDir
     if (sel) {
       float segCenter = items[i].angle;
       drawArcSegment(c, cx, cy, rIn, rOut, segCenter, 22.0f, 0x07FF);
-      // vertical light beam to top & bottom edges
-      c->drawFastVLine(ax, 0, ay, 0x07FF);
-      c->drawFastVLine(ax, ay, c->height() - ay, 0x07FF);
     }
     // dot with pulse on selected
     uint16_t dotColor = lerp565(0x2104, 0x07FF, cl);
