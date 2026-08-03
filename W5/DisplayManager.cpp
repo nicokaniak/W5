@@ -289,6 +289,30 @@ void DisplayManager::drawText(const String &text, int x, int y) {
   pushToDisplay();
 }
 
+// ISO 8601 week number from a filled struct tm.
+// ponytail: Thursday-of-week method — the ISO week belongs to the year of its
+// Thursday, so we compute the Thursday's day-of-year and divide by 7. Edge cases
+// (Thursday in prev/next year) resolve to that year's last/first week. The
+// prev-year fallback computes Jan 1 weekday to distinguish 52 vs 53.
+static int isoWeek(const struct tm &t) {
+  int isoWday = (t.tm_wday == 0) ? 7 : t.tm_wday; // Mon=1..Sun=7
+  int doy = t.tm_yday + 1;                        // 1-based day of year
+  int thuDoy = doy + (4 - isoWday);               // Thursday of this ISO week
+  int y = t.tm_year + 1900;
+  auto leap = [](int yr) { return (yr%4==0 && yr%100!=0) || (yr%400==0); };
+  int yearLen = 365 + (leap(y) ? 1 : 0);
+  if (thuDoy < 1) {
+    int py = y - 1;
+    int jan1Wday = ((isoWday - (doy - 1) - 1) % 7 + 7) % 7 + 1;
+    int prevLen = 365 + (leap(py) ? 1 : 0);
+    int prevJan1Wday = ((jan1Wday - (prevLen % 7) - 1) % 7 + 7) % 7 + 1;
+    bool has53 = (prevJan1Wday == 4) || (leap(py) && prevJan1Wday == 3);
+    return has53 ? 53 : 52;
+  }
+  if (thuDoy > yearLen) return 1;
+  return (thuDoy - 1) / 7 + 1;
+}
+
 void DisplayManager::drawWatchFace(const String &timeStr) {
   if (!canvas)
     return;
@@ -297,7 +321,7 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
   // Layout (536x240 landscape):
   //   Left two-thirds (0-360), split horizontally:
   //     Top half  (0-120):   Big 7-seg clock, scaled to fill
-  //     Bottom half (120-240): Date (DOW + DD MON YYYY)
+  //     Bottom half (120-240): Date (DOW + W## on left, DD.MM / YYYY on right)
   //   Right third (360-536): Moon phase, sunrise/sunset arc, wifi, temp
   //   Battery icon (32x32): top-right corner, left of the moon
 
@@ -367,8 +391,9 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
   int dateBlockW = (dateRowW > yearW) ? dateRowW : yearW;
   int dateBlockH = SDH + 4 + SDH; // two rows of 25px + 4px gap = 54
 
-  // DOW dot text at size 7 → 8*7 = 56px tall, matches the 54px date block.
-  const uint8_t DOW_SIZE = 7;
+  // DOW dot text at size 3 → 8*3 = 24px tall, matches the top row (25px).
+  // Bottom row of the DOW column shows "W" + ISO week number.
+  const uint8_t DOW_SIZE = 3;
   uint16_t dowW = 0, dowH = 0;
   String dow;
   if (dateStr.length() >= 3) {
@@ -383,10 +408,20 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
   int16_t groupY = canvas->height() - dateBlockH - 8;
   if (groupY < 122) groupY = 122; // don't cross into top section
 
-  // DOW on the left, vertically centered with the date block
-  int16_t dowY = groupY + (dateBlockH - dowH) / 2;
+  // DOW in the top row (aligned with DD.MM), W## in the bottom row (aligned with YYYY)
+  int16_t dowY = groupY + (SDH - dowH) / 2; // vertically centered in top row
   if (dow.length()) {
     dotText(canvas, dow.c_str(), groupX, dowY, DOW_SIZE, DATE_COLOR);
+  }
+
+  // Week number in the bottom row of the DOW column
+  int16_t weekY = groupY + SDH + 4; // same baseline as YYYY row
+  dotText(canvas, "W", groupX, weekY + (SDH - 24) / 2, DOW_SIZE, DATE_COLOR);
+  if (haveTime) {
+    int wk = isoWeek(timeinfo);
+    drawSmallDigits(canvas, wk, 2, groupX + 6 * DOW_SIZE + 2, weekY, DATE_COLOR);
+  } else {
+    drawSmallDigits(canvas, 0, 2, groupX + 6 * DOW_SIZE + 2, weekY, LABEL_COLOR);
   }
 
   // Date block on the right of DOW
@@ -503,9 +538,9 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
     int ssH = ss / 60, ssM = ss % 60;
 
     // SR/SS times stacked vertically in the dead space between calendar
-    // (ends ~232) and T (starts ~410). Centered in that 178px gap.
+    // (ends ~160) and T (starts ~414). Centered in that 254px gap.
     // Each row: label above, HH:MM below. Small 7-seg digits (16x25).
-    const int16_t ssX = 283;       // left edge of stacked times
+    const int16_t ssX = 249;       // left edge of stacked times
     const int16_t srLabelY = 162;
     const int16_t srTimeY  = 172;  // digits end at 197
     const int16_t ssLabelY = 202;
@@ -527,27 +562,27 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
     canvas->fillCircle(ssColonX, ssTimeY + 16, 2, SUN_LABEL_COLOR);
     drawSmallDigits(canvas, ssM, 2, ssColonX + 4, ssTimeY, SUN_LABEL_COLOR);
   } else {
-    dotText(canvas, "Sun: N/A", 340, 180, 1, LABEL_COLOR);
+    dotText(canvas, "Sun: N/A", 249, 180, 1, LABEL_COLOR);
   }
 
-  // Temperature (yellow, between sun arc and SS time, right column)
+  // Temperature (yellow, right column, aligned vertically with SS time)
   const uint16_t TEMP_COLOR = 0xFFE0;
   String tempStr = WeatherManager::getTemperature();
   bool tempValid = tempStr.length() > 0 && isDigit(tempStr.charAt(0));
   if (tempValid) {
-    dotText(canvas, "T:", rightX, 185, 2, LABEL_COLOR);
+    dotText(canvas, "T:", rightX, 212, 2, LABEL_COLOR);
     int dotPos = tempStr.indexOf('.');
     int tempInt = (dotPos > 0) ? tempStr.substring(0, dotPos).toInt()
                                 : tempStr.toInt();
     if (tempInt < 0) {
-      dotText(canvas, "-", rightX + 24, 185, 2, TEMP_COLOR);
-      drawSmallDigits(canvas, -tempInt, 2, rightX + 44, 185, TEMP_COLOR);
+      dotText(canvas, "-", rightX + 24, 212, 2, TEMP_COLOR);
+      drawSmallDigits(canvas, -tempInt, 2, rightX + 44, 212, TEMP_COLOR);
     } else {
-      drawSmallDigits(canvas, tempInt, 2, rightX + 24, 185, TEMP_COLOR);
+      drawSmallDigits(canvas, tempInt, 2, rightX + 24, 212, TEMP_COLOR);
     }
-    dotText(canvas, "C", rightX + 2 * (16 + 3) + 44, 185, 2, TEMP_COLOR);
+    dotText(canvas, "C", rightX + 2 * (16 + 3) + 44, 212, 2, TEMP_COLOR);
   } else {
-    dotText(canvas, "T:--", rightX, 185, 2, LABEL_COLOR);
+    dotText(canvas, "T:--", rightX, 212, 2, LABEL_COLOR);
   }
 
   // --- Corner brackets around each section ---
@@ -563,9 +598,9 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
   drawCornerBrackets(canvas, moonX - 4, moonY - 4,
                      MOON_SIZE + 8, MOON_SIZE + 8, BRACKET_LEG, BRACKET_COLOR);
   // SR/SS stacked times (dead space between clock and moon)
-  drawCornerBrackets(canvas, 279, 158, 84, 82, BRACKET_LEG, BRACKET_COLOR);
-  // Temperature (right column, between arc and SS)
-  drawCornerBrackets(canvas, rightX - 4, 181, 84, 33, BRACKET_LEG,
+  drawCornerBrackets(canvas, 245, 158, 84, 82, BRACKET_LEG, BRACKET_COLOR);
+  // Temperature (right column, aligned with SS time)
+  drawCornerBrackets(canvas, rightX - 4, 208, 84, 32, BRACKET_LEG,
                      BRACKET_COLOR);
 
   // Push buffer to display
