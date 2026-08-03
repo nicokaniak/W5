@@ -186,18 +186,23 @@ static void drawCornerBrackets(GFXcanvas16 *c, int16_t x, int16_t y,
   c->drawFastVLine(rx, by - leg + 1, leg, color);
 }
 
-// Draw a 1-bit PROGMEM bitmap scaled up by integer `scale`. Used to make the
-// 33x53 7-seg digits fill the top half of the screen. fillRect per set pixel.
+// Draw a 1-bit PROGMEM bitmap scaled by `sx`/`sy` (float for fine control).
+// Used to make the 33x53 7-seg digits fill the top half of the screen, and
+// to scale moon/icons by fractional amounts. fillRect per set pixel.
 static void drawBitmapScaled(GFXcanvas16 *c, int16_t x, int16_t y,
                              const unsigned char *bm, int16_t w, int16_t h,
-                             int scale, uint16_t color) {
+                             float sx, float sy, uint16_t color) {
   int16_t bytesPerRow = (w + 7) / 8;
   for (int16_t row = 0; row < h; row++) {
     for (int16_t col = 0; col < w; col++) {
       uint16_t byteIdx = row * bytesPerRow + col / 8;
       uint8_t bits = pgm_read_byte(&bm[byteIdx]);
       if (bits & (0x80 >> (col & 7))) {
-        c->fillRect(x + col * scale, y + row * scale, scale, scale, color);
+        int16_t px = (int16_t)(col * sx);
+        int16_t py = (int16_t)(row * sy);
+        int16_t ex = (int16_t)((col + 1) * sx);
+        int16_t ey = (int16_t)((row + 1) * sy);
+        c->fillRect(x + px, y + py, ex - px, ey - py, color);
       }
     }
   }
@@ -212,7 +217,7 @@ static void drawBigDigitsScaled(GFXcanvas16 *c, int value, int nDigits,
   for (int i = nDigits - 1; i >= 0; i--) {
     int d = value % 10;
     value /= 10;
-    drawBitmapScaled(c, x + i * step, y, fdDigits[d], dw, dh, scale, color);
+    drawBitmapScaled(c, x + i * step, y, fdDigits[d], dw, dh, scale, scale, color);
   }
 }
 
@@ -404,40 +409,46 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
   drawSmallDigits(canvas, year, 4, yx, dbY + SDH + 4, DATE_COLOR);
 
   // --- Top-right corner: wifi icon + battery icon ---
-  // Wifi (25x18) to the left of the battery (32x32), both at the top-right.
+  // Wifi (25x18 → 31x23) and battery (32x32 → 40x40), both in white.
   bool wifiOn = (WiFi.status() == WL_CONNECTED);
   int batPct = BatteryManager::getPercentage();
   uint8_t batIw = 0, batIh = 0;
   const unsigned char *batIcon = batteryIconBitmap(batPct, &batIw, &batIh);
-  uint16_t batCol;
-  if (batPct > 50)      batCol = 0x07E0; // green
-  else if (batPct > 20) batCol = 0xFFE0; // yellow
-  else                 batCol = 0xF800; // red
+  const uint16_t ICON_COLOR = 0xFFFF; // white
   const int16_t topRightMargin = 4;
-  int16_t batX = canvas->width() - batIw - topRightMargin;
+  // Battery: native 32x32 → target 40x40
+  const int16_t BAT_TW = 40, BAT_TH = 40;
+  float batSx = (float)BAT_TW / batIw;
+  float batSy = (float)BAT_TH / batIh;
+  int16_t batX = canvas->width() - BAT_TW - topRightMargin;
   int16_t topIconY = topRightMargin;
   if (batIcon) {
-    canvas->drawBitmap(batX, topIconY, batIcon, batIw, batIh, batCol);
+    drawBitmapScaled(canvas, batX, topIconY, batIcon, batIw, batIh,
+                     batSx, batSy, ICON_COLOR);
   }
   // Wifi icon to the left of the battery, vertically centered with it.
+  // Native 25x18 → target 31x23
   const int WIFI_W = 25, WIFI_H = 18;
-  int16_t wifiX = batX - WIFI_W - 6;
-  int16_t wifiY = topIconY + (batIh - WIFI_H) / 2;
-  canvas->drawBitmap(wifiX, wifiY, wifiOn ? wifi : wifioff, WIFI_W, WIFI_H,
-                     wifiOn ? 0x07E0 : 0x7BEF);
+  const int16_t WIFI_TW = 31, WIFI_TH = 23;
+  float wifiSx = (float)WIFI_TW / WIFI_W;
+  float wifiSy = (float)WIFI_TH / WIFI_H;
+  int16_t wifiX = batX - WIFI_TW - 6;
+  int16_t wifiY = topIconY + (BAT_TH - WIFI_TH) / 2;
+  drawBitmapScaled(canvas, wifiX, wifiY, wifiOn ? wifi : wifioff,
+                   WIFI_W, WIFI_H, wifiSx, wifiSy, ICON_COLOR);
 
   // --- Right column: moon phase + sunrise/sunset + temp ---
-  // Moon 61x61 at scale 2 = 122x122. x=414, ends at 536 (fits screen).
+  // Moon 61x61 at scale 1.5 = 91x91. x=414, ends at 505 (fits screen).
   // SR/SS times are stacked vertically in the dead space between clock
   // (ends ~332) and moon (starts 414), below the moon's vertical extent.
   const int16_t rightX = 414;
-  const int MOON_SCALE = 2;
+  const float MOON_SCALE = 1.5f;
   const int MOON_NATIVE = 61;
-  const int MOON_SIZE = MOON_NATIVE * MOON_SCALE; // 122
-  const int16_t moonY = 40;
+  const int MOON_SIZE = (int)(MOON_NATIVE * MOON_SCALE); // 91
+  const int16_t moonY = 56;
   const int16_t moonX = rightX;
 
-  // Moon phase (scaled 2x)
+  // Moon phase (scaled 1.5x)
   moonData_t moon;
   int mYear = haveTime ? timeinfo.tm_year + 1900 : 2025;
   int32_t mMonth = haveTime ? timeinfo.tm_mon + 1 : 1;
@@ -446,7 +457,7 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
   moon = s_moonP.getPhase(mYear, mMonth, mDay, mHour);
   const unsigned char *moonBm = moonBitmap(moon.angle, moon.percentLit);
   drawBitmapScaled(canvas, moonX, moonY, moonBm, MOON_NATIVE, MOON_NATIVE,
-                   MOON_SCALE, 0xFFFF); // white moon, 122x122
+                   MOON_SCALE, MOON_SCALE, 0xFFFF); // white moon, 91x91
 
   // Sunrise/sunset via Dusk2Dawn
   float lat = String(LATITUDE).toFloat();
@@ -486,7 +497,7 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
     else if (nowMin < sr) tk = 0;
     canvas->drawLine(arcX, arcY, arcX + arcW, arcY, 0x4208);
     int arrowX = arcX + (arcW * tk) / 60;
-    drawBitmapScaled(canvas, arrowX - 3, arcY - 12, arr, 3, 5, 2, SUN_COLOR);
+    drawBitmapScaled(canvas, arrowX - 3, arcY - 12, arr, 3, 5, 2, 2, SUN_COLOR);
 
     int srH = sr / 60, srM = sr % 60;
     int ssH = ss / 60, ssM = ss % 60;
