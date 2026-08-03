@@ -785,8 +785,8 @@ void DisplayManager::drawWeatherScreen() {
   const int16_t graphX = 10 + rulerW;           // 34
   const int16_t graphW = canvas->width() - 20 - rulerW;  // 492px
   const int16_t graphY = 35;
-  const int16_t graphH = 130;
-  const int16_t graphBottom = graphY + graphH;  // 165
+  const int16_t graphH = 160;
+  const int16_t graphBottom = graphY + graphH;  // 195
 
   // Guard against single data point (division by zero in x mapping)
   if (n < 2) {
@@ -805,7 +805,11 @@ void DisplayManager::drawWeatherScreen() {
     if (fc.temperature[i] > tempMax) tempMax = fc.temperature[i];
     if (fc.precipitation[i] > precipMax) precipMax = fc.precipitation[i];
   }
-  // Pad temp range so the line doesn't touch the edges
+  // Snap to integer bounds so ruler ticks align exactly with the temperature
+  // line. Floor the min, ceil the max, then pad by 1 degree so the line
+  // doesn't touch the graph edges.
+  tempMin = floorf(tempMin);
+  tempMax = ceilf(tempMax);
   if (tempMax - tempMin < 2.0f) { tempMin -= 1.0f; tempMax += 1.0f; }
   tempMin -= 1.0f;
   tempMax += 1.0f;
@@ -853,6 +857,62 @@ void DisplayManager::drawWeatherScreen() {
     canvas->fillCircle(x, y, 2, TEMP_COLOR);
   }
 
+  // --- Peak / Low / Average temperature annotations ---
+  // ponytail: peak label sits below the point, low label above, average at the
+  // hour whose temp is closest to the mean. Size-1 text (8x12) keeps it compact.
+  // Ceiling: labels can collide on tight clusters or at graph edges; no overlap
+  // avoidance. Upgrade: shift label x by text width when near right edge.
+  uint8_t peakIdx = 0, lowIdx = 0;
+  float sum = 0.0f;
+  for (uint8_t i = 0; i < n; i++) {
+    if (fc.temperature[i] > fc.temperature[peakIdx]) peakIdx = i;
+    if (fc.temperature[i] < fc.temperature[lowIdx])  lowIdx  = i;
+    sum += fc.temperature[i];
+  }
+  float avg = sum / n;
+  uint8_t avgIdx = 0;
+  float bestDiff = fabsf(fc.temperature[0] - avg);
+  for (uint8_t i = 1; i < n; i++) {
+    float d = fabsf(fc.temperature[i] - avg);
+    if (d < bestDiff) { bestDiff = d; avgIdx = i; }
+  }
+
+  const uint16_t PEAK_COLOR = 0xFFE0; // yellow
+  const uint16_t LOW_COLOR  = 0x07FF; // cyan
+  const uint16_t AVG_COLOR  = 0x07E0; // green
+  const int16_t lblH = 12;            // size-1 text height
+  const int16_t lblW = 8;             // size-1 char width (approx, per digit)
+
+  auto drawTempLabel = [&](uint8_t idx, int16_t yOff, uint16_t color) {
+    int16_t x = graphX + (int16_t)(graphW * idx) / (n - 1);
+    int16_t y = tempY(fc.temperature[idx]) + yOff;
+    char buf[8];
+    snprintf(buf, sizeof(buf), "%d", (int)round(fc.temperature[idx]));
+    // Center the label horizontally on the point
+    int16_t textW = (int16_t)(strlen(buf) * (lblW + 1));
+    int16_t lx = x - textW / 2;
+    // Clamp inside graph area
+    if (lx < graphX) lx = graphX;
+    if (lx + textW > graphX + graphW) lx = graphX + graphW - textW;
+    drawText7seg(canvas, buf, lx, y, 1, color);
+  };
+
+  drawTempLabel(peakIdx,  4,           PEAK_COLOR); // below peak
+  drawTempLabel(lowIdx,  -(lblH + 2),  LOW_COLOR);  // above low
+  // Average: label sits at the avg temp's y (middle of the temp band) at the
+  // hour where the curve is closest to the average.
+  {
+    int16_t ax = graphX + (int16_t)(graphW * avgIdx) / (n - 1);
+    int16_t ay = tempY(avg) - lblH / 2;
+    char buf[8];
+    snprintf(buf, sizeof(buf), "%d", (int)round(avg));
+    int16_t textW = (int16_t)(strlen(buf) * (lblW + 1));
+    int16_t lx = ax - textW / 2;
+    if (lx < graphX) lx = graphX;
+    if (lx + textW > graphX + graphW) lx = graphX + graphW - textW;
+    drawText7seg(canvas, buf, lx, ay, 1, AVG_COLOR);
+  }
+
   // --- Graph border ---
   canvas->drawRect(graphX, graphY, graphW, graphH, 0x4208); // dark gray border
 
@@ -860,8 +920,8 @@ void DisplayManager::drawWeatherScreen() {
   // ponytail: 3 tick marks + labels (max, mid, min) aligned to the graph's y-scale.
   // Shows the actual temp range so you can read values off the red line.
   const uint16_t RULER_COLOR = 0x8410; // dark gray
-  int tempHi = (int)round(tempMax - 1); // undo the pad
-  int tempLo = (int)round(tempMin + 1);
+  int tempHi = (int)tempMax; // already integer-bounded + padded
+  int tempLo = (int)tempMin;
   int tempMid = (tempHi + tempLo) / 2;
 
   struct { int16_t y; int val; } ticks[] = {
@@ -889,8 +949,8 @@ void DisplayManager::drawWeatherScreen() {
     drawText7seg(canvas, buf, x - 6, labelY, 1, 0x7BEF); // gray, size 1
   }
 
-  // --- Legend + location (single row at y=185) ---
-  const int16_t legendY = 185;
+  // --- Legend + location (single row at y=210) ---
+  const int16_t legendY = 210;
   // Precipitation swatch
   canvas->fillRect(10, legendY, 12, 12, PRECIP_COLOR);
   drawText7seg(canvas, "Rain", 28, legendY - 2, 1, 0x7BEF);
