@@ -348,8 +348,23 @@ static void drawEarthGlobe(GFXcanvas16 *c, int16_t cx, int16_t cy, int16_t R,
   const uint16_t LAND_DAY  = 0x0000; // black
   const uint16_t LAND_NIGHT= 0x0000; // black
   const uint16_t RIM       = 0x8410; // dim gray outline
+  // Whitish rim drawn around land masses on the night side only, so the
+  // continents stay readable against the dark night ocean. Light gray
+  // (~197,194,197) reads as "whitish" next to black land / dark-gray sea.
+  const uint16_t NIGHT_LAND_RIM = 0xC618;
 
   int32_t R2 = (int32_t)R * R;
+  // Per-pixel flags buffered during the fill so the night-side land outline
+  // pass needs no second lat/lon derivation. bit0 = land, bit1 = night.
+  // ponytail: static heap buffer resized when R changes; D*D bytes (8281 B at
+  // R=45). Single-threaded display path, so static is safe. Ceiling: R>~140
+  // would push the alloc past ~40 KB; fine on ESP32 PSRAM, revisit if needed.
+  const int16_t D = 2 * R + 1;
+  static uint8_t *flags = nullptr;
+  static int16_t flagsDim = 0;
+  if (flagsDim != D) { delete[] flags; flags = new uint8_t[D * D]; flagsDim = D; }
+  memset(flags, 0, D * D); // 0 = sea+day -> safely skipped by the outline pass
+
   for (int16_t dy = -R; dy <= R; dy++) {
     int16_t py = cy + dy;
     if (py < 0 || py >= c->height()) continue;
@@ -371,11 +386,33 @@ static void drawEarthGlobe(GFXcanvas16 *c, int16_t cx, int16_t cy, int16_t R,
       }
       bool land = earthIsLand(lat * 180.0 / M_PI, lon * 180.0 / M_PI);
       double cosZ = sin(lat) * sinD + cos(lat) * cosD * cos(lon - subLon);
-      uint16_t col = (cosZ > 0.0) ? (land ? LAND_DAY : SEA_DAY)
-                                  : (land ? LAND_NIGHT : SEA_NIGHT);
+      bool night = (cosZ <= 0.0);
+      uint16_t col = night ? (land ? LAND_NIGHT : SEA_NIGHT)
+                           : (land ? LAND_DAY : SEA_DAY);
       c->drawPixel(px, py, col);
+      flags[(dy + R) * D + (dx + R)] = (land ? 1 : 0) | (night ? 2 : 0);
     }
   }
+
+  // Night-side land outline: draw NIGHT_LAND_RIM on shadowed land pixels that
+  // border sea (4-neighbour). Out-of-disc neighbours are treated as non-sea so
+  // the globe rim itself isn't mistaken for a coastline. O(D^2), ~8k px at
+  // R=45, negligible vs the trig-heavy fill pass.
+  auto neighbourIsSea = [&](int16_t nx, int16_t ny) -> bool {
+    if ((int32_t)nx * nx + (int32_t)ny * ny > R2) return false;
+    return !(flags[(ny + R) * D + (nx + R)] & 1);
+  };
+  for (int16_t dy = -R; dy <= R; dy++) {
+    int16_t xspan = (int16_t)sqrtf((float)(R2 - (int32_t)dy * dy));
+    for (int16_t dx = -xspan; dx <= xspan; dx++) {
+      uint8_t f = flags[(dy + R) * D + (dx + R)];
+      if (!(f & 2) || !(f & 1)) continue; // night + land only
+      if (neighbourIsSea(dx - 1, dy) || neighbourIsSea(dx + 1, dy) ||
+          neighbourIsSea(dx, dy - 1) || neighbourIsSea(dx, dy + 1))
+        c->drawPixel(cx + dx, cy + dy, NIGHT_LAND_RIM);
+    }
+  }
+
   c->drawCircle(cx, cy, R, RIM);
   // User position is the projection center -> dot at disc center.
   c->fillCircle(cx, cy, 2, dotColor);
