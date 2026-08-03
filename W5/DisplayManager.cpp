@@ -406,11 +406,16 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
                      wifiOn ? 0x07E0 : 0x7BEF);
 
   // --- Right column: moon phase + sunrise/sunset + temp ---
-  // Dropped ~40px to clear the wifi/battery icons in the top-right corner.
-  const int16_t rightX = 380;
-  const int16_t rightTopY = 45; // was 5, now below the top-right icons
+  // Moved right and down, scaled up to fill the dead space.
+  // Moon 61x61 at scale 2 = 122x122. Right column x=408, ends at 530 (fits 536).
+  const int16_t rightX = 408;
+  const int MOON_SCALE = 2;
+  const int MOON_NATIVE = 61;
+  const int MOON_SIZE = MOON_NATIVE * MOON_SCALE; // 122
+  const int16_t moonY = 40;
+  const int16_t moonX = rightX;
 
-  // Moon phase (61x61, top of right column)
+  // Moon phase (scaled 2x)
   moonData_t moon;
   int mYear = haveTime ? timeinfo.tm_year + 1900 : 2025;
   int32_t mMonth = haveTime ? timeinfo.tm_mon + 1 : 1;
@@ -418,7 +423,8 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
   double mHour = haveTime ? timeinfo.tm_hour + 0.1 : 12.0;
   moon = s_moonP.getPhase(mYear, mMonth, mDay, mHour);
   const unsigned char *moonBm = moonBitmap(moon.angle, moon.percentLit);
-  canvas->drawBitmap(rightX, rightTopY, moonBm, 61, 61, 0xFFFF); // white moon
+  drawBitmapScaled(canvas, moonX, moonY, moonBm, MOON_NATIVE, MOON_NATIVE,
+                   MOON_SCALE, 0xFFFF); // white moon, 122x122
 
   // Sunrise/sunset via Dusk2Dawn
   float lat = String(LATITUDE).toFloat();
@@ -446,60 +452,62 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
   const uint16_t SUN_COLOR = 0xFD20; // orange
   const uint16_t SUN_LABEL_COLOR = 0xBDF7; // light blue-white
 
+  // Sun arc below the moon. Moon ends at moonY+122=162. Arc starts at 170.
   if (sr >= 0 && ss >= 0) {
     int nowMin = timeinfo.tm_hour * 60 + timeinfo.tm_min;
-    int arcX = rightX + 5;
-    int arcY = 115; // was 75, dropped 40px to clear top-right icons
+    int arcX = rightX;
+    int arcY = 170;
     int arcW = 120;
     int tk = (nowMin - sr) * 60 / (ss - sr);
     if (nowMin > ss) tk = 60;
     else if (nowMin < sr) tk = 0;
-    canvas->drawLine(arcX, arcY + 30, arcX + arcW, arcY + 30, 0x4208);
+    // Arc baseline
+    canvas->drawLine(arcX, arcY, arcX + arcW, arcY, 0x4208);
+    // Arrow at position (scaled 2x: 3x5 → 6x10)
     int arrowX = arcX + (arcW * tk) / 60;
-    canvas->drawBitmap(arrowX - 1, arcY + 25, arr, 3, 5, SUN_COLOR);
+    drawBitmapScaled(canvas, arrowX - 3, arcY - 12, arr, 3, 5, 2, SUN_COLOR);
 
     int srH = sr / 60, srM = sr % 60;
     int ssH = ss / 60, ssM = ss % 60;
 
-    dotText(canvas, "SR", arcX, arcY + 40, 1, LABEL_COLOR);
-    drawTinyDigits(canvas, srH, 2, arcX + 14, arcY + 40, SUN_LABEL_COLOR);
-    canvas->drawPixel(arcX + 14 + 2 * (3 + 1), arcY + 43, SUN_LABEL_COLOR);
-    canvas->drawPixel(arcX + 14 + 2 * (3 + 1), arcY + 45, SUN_LABEL_COLOR);
-    drawTinyDigits(canvas, srM, 2, arcX + 14 + 2 * (3 + 1) + 2,
-                   arcY + 40, SUN_LABEL_COLOR);
+    // Sunrise/sunset times using small 7-seg digits (16x25) instead of tiny
+    dotText(canvas, "SR", arcX, arcY + 6, 1, LABEL_COLOR);
+    drawSmallDigits(canvas, srH, 2, arcX + 14, arcY + 6, SUN_LABEL_COLOR);
+    // colon dots between HH and MM
+    int16_t srColonX = arcX + 14 + 2 * (16 + 3);
+    canvas->fillCircle(srColonX, arcY + 6 + 8, 2, SUN_LABEL_COLOR);
+    canvas->fillCircle(srColonX, arcY + 6 + 16, 2, SUN_LABEL_COLOR);
+    drawSmallDigits(canvas, srM, 2, srColonX + 4, arcY + 6, SUN_LABEL_COLOR);
 
-    dotText(canvas, "SS", arcX + arcW - 50, arcY + 40, 1, LABEL_COLOR);
-    drawTinyDigits(canvas, ssH, 2, arcX + arcW - 50 + 14, arcY + 40,
-                   SUN_LABEL_COLOR);
-    canvas->drawPixel(arcX + arcW - 50 + 14 + 2 * (3 + 1), arcY + 43,
-                       SUN_LABEL_COLOR);
-    canvas->drawPixel(arcX + arcW - 50 + 14 + 2 * (3 + 1), arcY + 45,
-                       SUN_LABEL_COLOR);
-    drawTinyDigits(canvas, ssM, 2,
-                   arcX + arcW - 50 + 14 + 2 * (3 + 1) + 2, arcY + 40,
-                   SUN_LABEL_COLOR);
+    dotText(canvas, "SS", arcX + arcW - 60, arcY + 6, 1, LABEL_COLOR);
+    drawSmallDigits(canvas, ssH, 2, arcX + arcW - 60 + 14, arcY + 6,
+                    SUN_LABEL_COLOR);
+    int16_t ssColonX = arcX + arcW - 60 + 14 + 2 * (16 + 3);
+    canvas->fillCircle(ssColonX, arcY + 6 + 8, 2, SUN_LABEL_COLOR);
+    canvas->fillCircle(ssColonX, arcY + 6 + 16, 2, SUN_LABEL_COLOR);
+    drawSmallDigits(canvas, ssM, 2, ssColonX + 4, arcY + 6, SUN_LABEL_COLOR);
   } else {
-    dotText(canvas, "Sun: N/A", rightX, 120, 1, LABEL_COLOR);
+    dotText(canvas, "Sun: N/A", rightX, 175, 1, LABEL_COLOR);
   }
 
-  // Temperature (yellow, below sun arc)
+  // Temperature (yellow, below sun arc labels)
   const uint16_t TEMP_COLOR = 0xFFE0;
   String tempStr = WeatherManager::getTemperature();
   bool tempValid = tempStr.length() > 0 && isDigit(tempStr.charAt(0));
   if (tempValid) {
-    dotText(canvas, "T:", rightX, 170, 2, LABEL_COLOR);
+    dotText(canvas, "T:", rightX, 210, 2, LABEL_COLOR);
     int dotPos = tempStr.indexOf('.');
     int tempInt = (dotPos > 0) ? tempStr.substring(0, dotPos).toInt()
                                 : tempStr.toInt();
     if (tempInt < 0) {
-      dotText(canvas, "-", rightX + 24, 170, 2, TEMP_COLOR);
-      drawSmallDigits(canvas, -tempInt, 2, rightX + 44, 170, TEMP_COLOR);
+      dotText(canvas, "-", rightX + 24, 210, 2, TEMP_COLOR);
+      drawSmallDigits(canvas, -tempInt, 2, rightX + 44, 210, TEMP_COLOR);
     } else {
-      drawSmallDigits(canvas, tempInt, 2, rightX + 24, 170, TEMP_COLOR);
+      drawSmallDigits(canvas, tempInt, 2, rightX + 24, 210, TEMP_COLOR);
     }
-    dotText(canvas, "C", rightX + 2 * (16 + 3) + 44, 170, 2, TEMP_COLOR);
+    dotText(canvas, "C", rightX + 2 * (16 + 3) + 44, 210, 2, TEMP_COLOR);
   } else {
-    dotText(canvas, "T:--", rightX, 170, 2, LABEL_COLOR);
+    dotText(canvas, "T:--", rightX, 210, 2, LABEL_COLOR);
   }
 
   // Push buffer to display
