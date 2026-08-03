@@ -467,14 +467,18 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
 
   // --- Top section: big scaled 7-seg clock ---
   // Digit native 33x53. Scale 2 → 66x106. Top section ~120px tall, fits.
-  // 4 digits + colon + gaps. Width = 4*66 + colon(16) + 2*gap(12) = 304.
+  // Width = 4 digits + 3 inter-digit gaps + colon. drawBigDigitsScaled uses
+  // step = dw*scale + gap, so a pair spans step + dw = 144, not 2*dw = 132.
+  // ponytail: clockW must match the actual rightmost pixel of MM's last digit,
+  // not a naive 4*dw + colon + 2*gap — that undercounts by one inter-digit gap
+  // and the corner brackets end up overlapping the time.
   const uint16_t TIME_COLOR = 0xFFFF; // white
   const int SCALE = 2;
   const int DW = 33 * SCALE;  // 66
   const int DH = 53 * SCALE;  // 106
   const int DGAP = 12;
   const int COLON_W = 16;
-  int clockW = 4 * DW + COLON_W + 2 * DGAP;  // 304
+  int clockW = 4 * DW + 3 * DGAP + COLON_W;  // 316
   const int16_t leftSpan = 360;
   int16_t timeX = (leftSpan - clockW) / 2;     // centered in left 2/3
   int16_t timeY = (120 - DH) / 2;             // centered in top half
@@ -532,8 +536,8 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
 
   const int COL_GAP = 16;
   int groupW = dowW + COL_GAP + dateBlockW;
-  // Push to lower-left: 8px left margin, 8px bottom margin.
-  int16_t groupX = 8;
+  // Push to lower-left: left edge aligned with the progress bar (= timeX).
+  int16_t groupX = timeX;
   int16_t groupY = canvas->height() - dateBlockH - 8;
   if (groupY < 122) groupY = 122; // don't cross into top section
 
@@ -678,9 +682,12 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
     int srH = sr / 60, srM = sr % 60;
     int ssH = ss / 60, ssM = ss % 60;
 
-    const int16_t ssX = 190;      // right of date group (ends ~160), gap for breathing room
+    // Right-aligned to the progress bar's right edge (timeX + clockW).
     const int16_t labelW = 35;    // "SR"/"SS" at size 3 (16x25, gap 3)
     const int16_t labelGap = 4;
+    // Block width: label + gap + HH digits + colon gap + MM digits
+    const int16_t ssW = labelW + labelGap + 2*(16+3) + 4 + (2*(16+3) - 3); // 116
+    const int16_t ssX = timeX + clockW - ssW; // right-aligned to bar
     const int16_t digitX = ssX + labelW + labelGap;
     const int16_t srY = 178;      // aligned with date group top row
     const int16_t ssY = 178 + 25 + 4; // aligned with date group bottom row
@@ -702,7 +709,7 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
     canvas->fillCircle(ssColonX, ssY + 16, 2, SUN_LABEL_COLOR);
     drawSmallDigits(canvas, ssM, 2, ssColonX + 4, ssY, SUN_LABEL_COLOR);
   } else {
-    drawText7seg(canvas, "Sun: N/A", 190, 190, 1, LABEL_COLOR);
+    drawText7seg(canvas, "Sun: N/A", timeX + clockW - 80, 190, 1, LABEL_COLOR);
   }
 
   // --- Day progress bar under the clock ---
@@ -770,8 +777,12 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
   // Earth globe (right, 91x91)
   drawCornerBrackets(canvas, globeX - 4, globeY - 4,
                      GLOBE_SIZE + 8, GLOBE_SIZE + 8, BRACKET_LEG, BRACKET_COLOR);
-  // SR/SS inline times (left, aligned with date group rows)
-  drawCornerBrackets(canvas, 186, 174, 121, 62, BRACKET_LEG, BRACKET_COLOR);
+  // SR/SS inline times (right-aligned to progress bar)
+  {
+    const int16_t ssW = 35 + 4 + 2*(16+3) + 4 + (2*(16+3) - 3); // 116
+    drawCornerBrackets(canvas, timeX + clockW - ssW - 4, 174, ssW + 8, 62,
+                       BRACKET_LEG, BRACKET_COLOR);
+  }
   // Temperature (right column, aligned with SS time)
   drawCornerBrackets(canvas, rightX - 4, 208, 84, 32, BRACKET_LEG,
                      BRACKET_COLOR);
