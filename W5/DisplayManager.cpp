@@ -488,11 +488,10 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
   //     Top half  (0-120):   Big 7-seg clock, scaled to fill
   //     Bottom half (120-240): Date (DOW + W## on left, DD.MM / YYYY on right)
   //   Right third (360-536): Earth globe (day/night + position dot), wifi, temp
-//   Day progress bar: under the clock (24h, hatched sleeping edges + now marker)
+//   Day progress bar: under the clock (24h, dotted sleeping edges + now marker)
   //   Battery icon (32x32): top-right corner, left of the globe
 
   canvas->fillScreen(0x0000); // black background
-  drawStarfield(canvas, 60);   // deterministic procedural stars
 
   // Fetch local time once for all date/Earth/sun calculations below.
   struct tm timeinfo;
@@ -590,9 +589,9 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
   drawText7seg(canvas, "W", groupX, weekY + (SDH - 24) / 2, DOW_SIZE, LABEL_COLOR);
   if (haveTime) {
     int wk = isoWeek(timeinfo);
-    drawSmallDigits(canvas, wk, 2, groupX + 6 * DOW_SIZE + 2, weekY, LABEL_COLOR);
+    drawSmallDigits(canvas, wk, 2, groupX + 6 * DOW_SIZE + 2, weekY, DATE_COLOR);
   } else {
-    drawSmallDigits(canvas, 0, 2, groupX + 6 * DOW_SIZE + 2, weekY, LABEL_COLOR);
+    drawSmallDigits(canvas, 0, 2, groupX + 6 * DOW_SIZE + 2, weekY, DATE_COLOR);
   }
 
   // Date block on the right of DOW
@@ -653,15 +652,17 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
                    WIFI_W, WIFI_H, wifiSx, wifiSy, ICON_COLOR);
 
   // --- Right column: Earth globe + sunrise/sunset + temp ---
-  // Orthographic globe 91x91 (R=45), centered geographically on the user's
+  // Orthographic globe 120x120 (R=60), centered geographically on the user's
   // location so the user's face of Earth (Europe, for Copenhagen) is shown
-  // and the position dot sits at the disc center. x=414, ends at 505.
+  // and the position dot sits at the disc center. x=414, ends at 534.
   // SR/SS times are stacked vertically in the dead space between clock
   // (ends ~332) and globe (starts 414), below the globe's vertical extent.
-  const int16_t rightX = 414;
-  const int GLOBE_SIZE = 91;
-  const int GLOBE_R = GLOBE_SIZE / 2;          // 45
-  const int16_t globeY = 56;
+  // ponytail: globe sized to fill the column width (122px) and shifted down
+  // to close the dead space between the globe and the temperature readout.
+  const int16_t rightX = 408;
+  const int GLOBE_SIZE = 120;
+  const int GLOBE_R = GLOBE_SIZE / 2;          // 60
+  const int16_t globeY = 66;
   const int16_t globeX = rightX;
   const int16_t globeCx = globeX + GLOBE_R;
   const int16_t globeCy = globeY + GLOBE_R;
@@ -683,7 +684,7 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
   // Sun geometry for the day/night terminator.
   // ponytail: declination from the standard day-of-year approximation
   // (good to ~0.5 deg); subsolar longitude from UTC hours ignoring the
-  // equation of time (good to ~0.5 deg). Both well within a 91px globe.
+  // equation of time (good to ~0.5 deg). Both well within a 120px globe.
   //   dec       = -23.44 deg * cos(2pi/365 * (N+10))   N = day of year
   //   subLon    = (12 - utcHours) * 15 deg             utcHours = local - tz
   {
@@ -752,7 +753,7 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
   }
 
   // --- Day progress bar under the clock ---
-  // Full 24h (midnight→midnight). Hatched edges = sleeping (night: 0→sunrise,
+  // Full 24h (midnight→midnight). Dotted edges = sleeping (night: 0→sunrise,
   // sunset→1440). Clear middle = awake (sunrise→sunset). Triangle = now.
   // ponytail: hatch is a fixed 3px-pitch diagonal scan; at barH=20 the
   // diagonals still cover without gaps. Enlarge past ~24 and upgrade to a
@@ -762,17 +763,19 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
     const int16_t barY = 140;
     const int16_t barW = clockW;
     const int16_t barH = 20;
-    const uint16_t HATCH_COLOR = 0x6B4E; // lighter blue-gray, sleepy
+    const uint16_t DOT_COLOR = 0x6B4E; // lighter blue-gray, sleepy
 
-    // Hatched sleeping edges first, then border on top.
+    // Dotted sleeping edges first, then border on top.
+    // ponytail: uniform 3px-pitch dot grid. At barH=20 this yields 6 rows,
+    // enough to read as a fill. Enlarge past ~30 tall and bump to r=1 dots.
     int16_t srX = barX + (int32_t)sr * barW / 1440;
     int16_t ssX = barX + (int32_t)ss * barW / 1440;
-    for (int16_t hx = barX + 1; hx < barX + barW - 1; hx += 3) {
-      if (hx >= srX && hx < ssX) continue; // skip awake middle
-      int16_t top = barY + 1, bot = barY + barH - 2;
-      int16_t ex = hx + 2;
-      if (ex > barX + barW - 2) ex = barX + barW - 2;
-      canvas->drawLine(hx, bot, ex, top, HATCH_COLOR);
+    for (int16_t dy = 2; dy < barH - 1; dy += 3) {
+      for (int16_t dx = 2; dx < barW - 1; dx += 3) {
+        int16_t px = barX + dx;
+        if (px >= srX && px < ssX) continue; // skip awake middle
+        canvas->drawPixel(px, barY + dy, DOT_COLOR);
+      }
     }
     canvas->drawRect(barX, barY, barW, barH, LABEL_COLOR);
 
@@ -789,19 +792,19 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
   String tempStr = WeatherManager::getTemperature();
   bool tempValid = tempStr.length() > 0 && isDigit(tempStr.charAt(0));
   if (tempValid) {
-    drawText7seg(canvas, "T:", rightX, 212, 2, LABEL_COLOR);
+    drawText7seg(canvas, "T:", rightX, 207, 2, LABEL_COLOR);
     int dotPos = tempStr.indexOf('.');
     int tempInt = (dotPos > 0) ? tempStr.substring(0, dotPos).toInt()
                                 : tempStr.toInt();
     if (tempInt < 0) {
-      drawText7seg(canvas, "-", rightX + 24, 212, 2, TEMP_COLOR);
-      drawSmallDigits(canvas, -tempInt, 2, rightX + 44, 212, TEMP_COLOR);
+      drawText7seg(canvas, "-", rightX + 24, 207, 2, TEMP_COLOR);
+      drawSmallDigits(canvas, -tempInt, 2, rightX + 44, 207, TEMP_COLOR);
     } else {
-      drawSmallDigits(canvas, tempInt, 2, rightX + 24, 212, TEMP_COLOR);
+      drawSmallDigits(canvas, tempInt, 2, rightX + 24, 207, TEMP_COLOR);
     }
-    drawText7seg(canvas, "C", rightX + 2 * (16 + 3) + 44, 212, 2, TEMP_COLOR);
+    drawText7seg(canvas, "C", rightX + 2 * (16 + 3) + 44, 207, 2, TEMP_COLOR);
   } else {
-    drawText7seg(canvas, "T:--", rightX, 212, 2, LABEL_COLOR);
+    drawText7seg(canvas, "T:--", rightX, 207, 2, LABEL_COLOR);
   }
 
   // --- Corner brackets around each section ---
@@ -813,7 +816,7 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
   // Calendar (lower-left, DOW + date block)
   drawCornerBrackets(canvas, groupX - 4, groupY - 4,
                      groupW + 8, dateBlockH + 8, BRACKET_LEG, BRACKET_COLOR);
-  // Earth globe (right, 91x91)
+  // Earth globe (right, 120x120)
   drawCornerBrackets(canvas, globeX - 4, globeY - 4,
                      GLOBE_SIZE + 8, GLOBE_SIZE + 8, BRACKET_LEG, BRACKET_COLOR);
   // SR/SS inline times (right-aligned to progress bar)
@@ -823,7 +826,7 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
                        BRACKET_LEG, BRACKET_COLOR);
   }
   // Temperature (right column, aligned with SS time)
-  drawCornerBrackets(canvas, rightX - 4, 208, 84, 32, BRACKET_LEG,
+  drawCornerBrackets(canvas, rightX - 4, 203, 84, 33, BRACKET_LEG,
                      BRACKET_COLOR);
 
   // Push buffer to display
