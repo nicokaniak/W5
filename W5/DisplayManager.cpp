@@ -712,7 +712,8 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
   const uint16_t TEMP_COLOR = 0xFFFF; // white
   const int16_t TICON_W = 24, TICON_H = 24;
   String tempStr = WeatherManager::getTemperature();
-  bool tempValid = tempStr.length() > 0 && isDigit(tempStr.charAt(0));
+  bool tempValid = tempStr.length() > 0 &&
+                   (isDigit(tempStr.charAt(0)) || tempStr.charAt(0) == '-');
   if (tempValid) {
     canvas->drawBitmap(rightX, 207, FICON_THERMOMETER, TICON_W, TICON_H, TEMP_COLOR);
     int dotPos = tempStr.indexOf('.');
@@ -1646,6 +1647,62 @@ void DisplayManager::drawMenuStylePicker(uint8_t pickerIndex) {
     // reticle around the selected row
     if (sel) drawCornerBrackets(c, 6, y - 4, c->width() - 12, itemH - 4, 4, 0x07FF);
   }
+
+  // Hint
+  drawText7seg(c, "DBL CLICK APPLY   BOTH BACK", 10, c->height() - 16, 1, 0x7BEF);
+
+  pushToDisplay();
+}
+
+void DisplayManager::drawBrightnessPicker(uint8_t pickerIndex) {
+  if (!canvas)
+    return;
+  GFXcanvas16 *c = canvas;
+  c->fillScreen(0x0000);
+
+  // Title
+  drawText7seg(c, "BRIGHTNESS", 10, 10, 3, 0xFFE0);  // yellow
+
+  // ponytail: 16-segment horizontal bar. Each filled segment = one level.
+  // segW/gap chosen so the bar spans most of the 536px width.
+  const uint8_t segs = BRIGHTNESS_LEVELS;
+  const int16_t segW = 29, gap = 2;
+  const int16_t barW = segs * segW + (segs - 1) * gap;  // 494
+  const int16_t barX = (c->width() - barW) / 2;         // centered
+  const int16_t barY = 110;
+  const int16_t barH = 30;
+
+  const uint8_t applied = MenuManager::brightness();
+
+  for (uint8_t i = 0; i < segs; i++) {
+    int16_t x = barX + i * (segW + gap);
+    // ponytail: level N fills N of 16 segments. Level 0 = empty (panel off),
+    // level 15 = 15/16 filled (reads as "near max"). Consistent 1:1 mapping.
+    bool filled = (i < pickerIndex);
+    uint16_t col = filled ? 0x07FF : 0x2104;       // cyan filled, dim empty
+    c->fillRect(x, barY, segW, barH, col);
+  }
+
+  // Reticle around the whole bar
+  drawCornerBrackets(c, barX - 6, barY - 6, barW + 12, barH + 12, 5, 0x07FF);
+
+  // "(current)" marker on the applied level's segment
+  if (applied < segs) {
+    int16_t mx = barX + applied * (segW + gap) + segW / 2;
+    c->fillCircle(mx, barY + barH + 12, 4, 0xFFE0);
+  }
+
+  // Numeric readout: level n/15 and DBV percentage
+  char buf[16];
+  snprintf(buf, sizeof(buf), "LVL %u/%u", pickerIndex, segs - 1);
+  uint16_t w, h;
+  text7segBounds(buf, 2, &w, &h);
+  drawText7seg(c, buf, (c->width() - w) / 2, barY + barH + 30, 2, 0xFFFF);
+
+  uint8_t pct = (uint8_t)((uint32_t)pickerIndex * 100 / (segs - 1));
+  snprintf(buf, sizeof(buf), "%u%%", pct);
+  text7segBounds(buf, 3, &w, &h);
+  drawText7seg(c, buf, (c->width() - w) / 2, 60, 3, 0x07FF);
 
   // Hint
   drawText7seg(c, "DBL CLICK APPLY   BOTH BACK", 10, c->height() - 16, 1, 0x7BEF);

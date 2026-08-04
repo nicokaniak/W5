@@ -7,7 +7,8 @@
 // Two-button stopwatch state machine.
 //   TOP click        -> Start (idle/stopped) / Stop (running)
 //   BOTTOM click     -> Lap (running; records split since prior lap) / Reset (stopped)
-//   BOTH long-press  -> exit to menu (handled by MenuManager)
+//   BOTTOM long-press -> exit to menu (handled by MenuManager)
+//   BOTH press       -> exit to menu (handled by MenuManager)
 class StopwatchManager {
 public:
   static void init();

@@ -3,6 +3,7 @@
 #include "DisplayManager.h"
 #include <HTTPClient.h>
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <time.h>
 
 static String temperature = "--";
@@ -144,7 +145,14 @@ void WeatherManager::updateWeather() {
     String apiUrl =
         "https://api.open-meteo.com/v1/forecast?latitude=" + String(LATITUDE) +
         "&longitude=" + String(LONGITUDE) + "&current_weather=true";
-    http.begin(apiUrl);
+    // ponytail: http.begin(url) creates a WiFiClientSecure that validates server
+    // certs by default, but no CA cert is loaded and system time may not be
+    // synced yet — TLS handshake fails silently. setInsecure() skips validation
+    // (acceptable: public weather data, no secrets). Ceiling: MITM possible.
+    // Upgrade path: load a root CA bundle with wifiClient.setCACert().
+    WiFiClientSecure secureClient;
+    secureClient.setInsecure();
+    http.begin(secureClient, apiUrl);
     int httpCode = http.GET();
     if (httpCode == 200) {
       String payload = http.getString();
@@ -164,6 +172,7 @@ void WeatherManager::updateWeather() {
       if (tempIdx != -1) {
         int start = tempIdx + 14;
         int end = payload.indexOf(",", start);
+        if (end == -1) end = payload.indexOf("}", start); // last field in object
         temperature = payload.substring(start, end);
         Serial.println("Weather updated: " + temperature + " °C");
       }
@@ -229,7 +238,9 @@ static void fetchHourlyForecast() {
       "https://api.open-meteo.com/v1/forecast?latitude=" + String(LATITUDE) +
       "&longitude=" + String(LONGITUDE) +
       "&hourly=temperature_2m,precipitation,weathercode&forecast_days=2&timezone=auto";
-  http.begin(apiUrl);
+  WiFiClientSecure secureClient;
+  secureClient.setInsecure();
+  http.begin(secureClient, apiUrl);
   http.setTimeout(8000);
   int httpCode = http.GET();
 

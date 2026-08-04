@@ -6,6 +6,7 @@
 #include <WiFi.h>
 #include <WiFiManager.h>
 #include <Preferences.h> // ESP32 NVS — in Arduino-ESP32 core, no external dep
+#include "rm67162.h"     // lcd_brightness() — apply level to the panel
 
 // ponytail: WiFiManager must be installed for on-device Wi-Fi setup. In Arduino IDE
 // use the Library Manager; in PlatformIO add tzapu/WiFiManager to lib_deps.
@@ -17,9 +18,10 @@ static const char* MENU_ITEMS[] = { "Watch", "Stopwatch", "Weather", "Config" };
 static const uint8_t NUM_ITEMS = 4;
 
 // ponytail: config sub-menu. Adding items only requires extending this array;
-// the handler dispatches by index below. Index 0 = Wi-Fi portal, 1 = style picker.
-static const char* CONFIG_ITEMS[] = { "Setup Wi-Fi", "Menu Style" };
-static const uint8_t NUM_CONFIG_ITEMS = 2;
+// the handler dispatches by index below. Index 0 = Wi-Fi portal, 1 = style picker,
+// 2 = brightness picker.
+static const char* CONFIG_ITEMS[] = { "Setup Wi-Fi", "Menu Style", "Brightness" };
+static const uint8_t NUM_CONFIG_ITEMS = 3;
 
 // ponytail: rotary menu visual styles. Keep in sync with MenuStyle enum (header).
 static const char* MENU_STYLE_LABELS[] = { "HUD", "HOLO", "DATA", "MINIMAL" };
@@ -31,6 +33,14 @@ static_assert(NUM_CONFIG_ITEMS > 0, "config menu must have at least one item");
 
 static const uint32_t ANIM_DURATION_MS = 350;  // scroll animation length
 
+// ponytail: level 0..15 -> DBV 0..255 (level * 17). 17*15 = 255 exactly.
+// File-local so DisplayManager's picker can re-derive the same fill count from
+// the level without a circular include.
+static inline uint8_t brightnessValue(uint8_t level) {
+  if (level >= BRIGHTNESS_LEVELS) level = BRIGHTNESS_LEVELS - 1;
+  return (uint8_t)(level * 17);
+}
+
 AppMode  MenuManager::_mode          = MODE_WATCH;
 uint8_t  MenuManager::_selectedIndex = 0;
 bool     MenuManager::_dirty         = false;
@@ -40,6 +50,8 @@ int8_t   MenuManager::_scrollDir     = 0;
 uint32_t MenuManager::_animStartTime = 0;
 MenuStyle MenuManager::_menuStyle       = STYLE_HUD;
 MenuStyle MenuManager::_stylePickerIndex = STYLE_HUD;
+uint8_t   MenuManager::_brightness       = BRIGHTNESS_LEVELS - 1; // default max
+uint8_t   MenuManager::_brightnessPicker = BRIGHTNESS_LEVELS - 1;
 AppMode   MenuManager::_pendingMode      = MODE_WATCH;
 
 void MenuManager::init() {
@@ -53,10 +65,15 @@ void MenuManager::init() {
   Preferences prefs;
   prefs.begin("w5", true); // read-only
   uint8_t s = prefs.getUChar("mstyle", (uint8_t)STYLE_HUD);
+  uint8_t b = prefs.getUChar("bright", BRIGHTNESS_LEVELS - 1);
   prefs.end();
   if (s >= MENU_STYLE_COUNT) s = (uint8_t)STYLE_HUD;
   _menuStyle = (MenuStyle)s;
   _stylePickerIndex = _menuStyle;
+  if (b >= BRIGHTNESS_LEVELS) b = BRIGHTNESS_LEVELS - 1;
+  _brightness = b;
+  _brightnessPicker = b;
+  lcd_brightness(brightnessValue(b));  // apply persisted brightness to the panel
   _pendingMode = MODE_WATCH;
 }
 
@@ -104,6 +121,20 @@ void MenuManager::setMenuStyle(MenuStyle s) {
   Serial.printf("MENU: style set -> %u (%s)\n", (uint8_t)s, MENU_STYLE_LABELS[s]);
 }
 
+uint8_t MenuManager::brightness()          { return _brightness; }
+uint8_t MenuManager::brightnessPickerIndex() { return _brightnessPicker; }
+
+void MenuManager::setBrightness(uint8_t level) {
+  if (level >= BRIGHTNESS_LEVELS) level = BRIGHTNESS_LEVELS - 1;
+  _brightness = level;
+  lcd_brightness(brightnessValue(level));  // apply to panel immediately
+  Preferences prefs;
+  prefs.begin("w5", false); // read-write
+  prefs.putUChar("bright", level);
+  prefs.end();
+  Serial.printf("BRIGHT: level %u -> DBV %u\n", level, brightnessValue(level));
+}
+
 bool MenuManager::isAnimating() { return _animating; }
 int8_t MenuManager::scrollDir() { return _scrollDir; }
 
@@ -140,7 +171,7 @@ void MenuManager::startScroll(int8_t dir) {
 void MenuManager::handleEvent(ButtonEvent evt) {
   if (evt == EVENT_NONE) return;
 
-  if (evt == EVENT_BOTH_LONG_PRESS) {
+  if (evt == EVENT_BOTH_PRESS) {
     _animating = false;
     _scrollDir = 0;
     if (_mode == MODE_MENU) {
@@ -150,6 +181,13 @@ void MenuManager::handleEvent(ButtonEvent evt) {
       _stylePickerIndex = _menuStyle;
       _mode = MODE_CONFIG;
       _configIndex = 1; // land back on "Menu Style"
+    } else if (_mode == MODE_BRIGHTNESS) {
+      // Exit brightness picker back to config sub-menu (discard unapplied cursor,
+      // restore the persisted brightness so the panel reflects the saved state).
+      _brightnessPicker = _brightness;
+      lcd_brightness(brightnessValue(_brightness));
+      _mode = MODE_CONFIG;
+      _configIndex = 2; // land back on "Brightness"
     } else if (_mode == MODE_CONFIG) {
       // Exit config sub-menu back to the main Config item.
       _mode = MODE_MENU;
@@ -163,8 +201,35 @@ void MenuManager::handleEvent(ButtonEvent evt) {
     return;
   }
 
+  // Long-press BOTTOM: go back to the menu from any screen, or exit menu to
+  // watch. From the watch face, it enters the menu — so there's always an easy
+  // way in without the simultaneous two-button press.
+  if (evt == EVENT_BOTTOM_LONG_PRESS) {
+    _animating = false;
+    _scrollDir = 0;
+    if (_mode == MODE_MENU) {
+      _mode = MODE_WATCH;
+    } else if (_mode == MODE_MENU_STYLE) {
+      _stylePickerIndex = _menuStyle;  // discard unapplied cursor
+      _mode = MODE_MENU;
+      _selectedIndex = NUM_ITEMS - 1;  // land on Config item
+    } else if (_mode == MODE_BRIGHTNESS) {
+      _brightnessPicker = _brightness;  // discard unapplied cursor
+      lcd_brightness(brightnessValue(_brightness));  // restore panel
+      _mode = MODE_MENU;
+      _selectedIndex = NUM_ITEMS - 1;
+    } else {
+      // From WATCH, STOPWATCH, WEATHER, CONFIG, TRANSITION -> go to menu
+      _mode = MODE_MENU;
+      _selectedIndex = 0;
+    }
+    _dirty = true;
+    Serial.printf("MENU: back -> mode %d\n", (int)_mode);
+    return;
+  }
+
   // Stopwatch handles its own button events (start/stop/lap/reset);
-  // BOTH_LONG_PRESS already exited to menu above.
+  // BOTH_PRESS and BOTTOM_LONG_PRESS already exited to menu above.
   if (_mode == MODE_STOPWATCH) {
     StopwatchManager::handleEvent(evt);
     return;
@@ -185,13 +250,43 @@ void MenuManager::handleEvent(ButtonEvent evt) {
         Serial.printf("STYLE: cursor -> %u (%s)\n", (uint8_t)_stylePickerIndex,
                       MENU_STYLE_LABELS[_stylePickerIndex]);
         break;
-      case EVENT_TOP_DOUBLE_CLICK:
+      case EVENT_TOP_LONG_PRESS:
         // Apply + exit to main menu so the user sees the new style live.
         setMenuStyle(_stylePickerIndex);
         _mode = MODE_MENU;
         _selectedIndex = NUM_ITEMS - 1; // land on Config item
         _dirty = true;
         Serial.printf("STYLE: applied %u, mode -> MENU\n", (uint8_t)_stylePickerIndex);
+        break;
+      default: break;
+    }
+    return;
+  }
+
+  // Brightness picker sub-screen.
+  if (_mode == MODE_BRIGHTNESS) {
+    switch (evt) {
+      case EVENT_TOP_CLICK:
+        _brightnessPicker = (_brightnessPicker + 1) % BRIGHTNESS_LEVELS;
+        lcd_brightness(brightnessValue(_brightnessPicker)); // live preview
+        _dirty = true;
+        Serial.printf("BRIGHT: cursor -> %u (DBV %u)\n",
+                      _brightnessPicker, brightnessValue(_brightnessPicker));
+        break;
+      case EVENT_BOTTOM_CLICK:
+        _brightnessPicker = (_brightnessPicker + BRIGHTNESS_LEVELS - 1) % BRIGHTNESS_LEVELS;
+        lcd_brightness(brightnessValue(_brightnessPicker)); // live preview
+        _dirty = true;
+        Serial.printf("BRIGHT: cursor -> %u (DBV %u)\n",
+                      _brightnessPicker, brightnessValue(_brightnessPicker));
+        break;
+      case EVENT_TOP_LONG_PRESS:
+        // Apply + exit to main menu so the user sees the new brightness live.
+        setBrightness(_brightnessPicker);
+        _mode = MODE_MENU;
+        _selectedIndex = NUM_ITEMS - 1; // land on Config item
+        _dirty = true;
+        Serial.printf("BRIGHT: applied %u, mode -> MENU\n", _brightnessPicker);
         break;
       default: break;
     }
@@ -211,7 +306,7 @@ void MenuManager::handleEvent(ButtonEvent evt) {
         _dirty = true;
         Serial.printf("CONFIG: scroll -> %u (%s)\n", _configIndex, CONFIG_ITEMS[_configIndex]);
         break;
-      case EVENT_TOP_DOUBLE_CLICK:
+      case EVENT_TOP_LONG_PRESS:
         if (_configIndex == 0) {
           runWifiPortal();
         } else if (_configIndex == 1) {
@@ -220,6 +315,12 @@ void MenuManager::handleEvent(ButtonEvent evt) {
           _mode = MODE_MENU_STYLE;
           _dirty = true;
           Serial.println("CONFIG: open style picker");
+        } else if (_configIndex == 2) {
+          // Open the brightness picker; cursor starts at the current level.
+          _brightnessPicker = _brightness;
+          _mode = MODE_BRIGHTNESS;
+          _dirty = true;
+          Serial.println("CONFIG: open brightness picker");
         }
         break;
       default: break;
@@ -240,7 +341,7 @@ void MenuManager::handleEvent(ButtonEvent evt) {
       startScroll(-1);  // scroll down — items slide DOWN, item above drops to center
       Serial.printf("MENU: scroll down -> %u (%s)\n", _selectedIndex, MENU_ITEMS[_selectedIndex]);
       break;
-    case EVENT_TOP_DOUBLE_CLICK:
+    case EVENT_TOP_LONG_PRESS:
       _animating = false;
       _scrollDir = 0;
       // ponytail: dive/zoom transition — bracket contracts into the selected

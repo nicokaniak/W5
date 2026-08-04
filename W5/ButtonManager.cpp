@@ -3,52 +3,40 @@
 
 // ponytail: User tested on hardware — GPIO 21 is the physical TOP button,
 // GPIO 0 (BOOT) is the physical BOTTOM button.
-// TOP button does double-duty: scroll up (single click) + select (double-click).
-// BOTTOM button: scroll down only.
+// TOP:    click = scroll up,  long press = select/enter
+// BOTTOM: click = scroll down, long press = go back
+// BOTH:   pressed together = enter/exit menu
 
-static const uint32_t DEBOUNCE_MS        = 20;
-static const uint32_t SIMULTANEOUS_MS    = 200;   // both pressed within this window = "at the same time"
-static const uint32_t DOUBLE_CLICK_MS    = 450;   // window between taps of a double-tap
-static const uint32_t SHORT_PRESS_MAX_MS = 700;   // press shorter than this is a click candidate
+static const uint32_t DEBOUNCE_MS     = 20;
+static const uint32_t LONG_PRESS_MS   = 600;   // hold threshold for long press
+static const uint32_t SIMULTANEOUS_MS = 500;   // both pressed within this window = "together"
 
-// ponytail: zero-initialized at file scope (state=0=IDLE since IDLE is the first
-// enumerator). pin is set in init() — can't use IDLE here because BtnState is private.
 ButtonManager::Btn ButtonManager::_top;
 ButtonManager::Btn ButtonManager::_bottom;
-bool ButtonManager::_bothLongFired = false;
+bool ButtonManager::_bothFired = false;
 ButtonEvent ButtonManager::_pending = EVENT_NONE;
 
 void ButtonManager::emit(ButtonEvent e) {
-  // ponytail: single-slot pending event. If two events fire in one update tick,
-  // the second overwrites the first. Rare and harmless (user just presses again).
-  // Ceiling: missed event on simultaneous transitions. Upgrade: small ring buffer.
   _pending = e;
 }
 
 void ButtonManager::init() {
-  _top.pin    = PIN_BUTTON_2;  // GPIO 21 (user)  -> physical TOP    -> scroll up + select
-  _bottom.pin = PIN_BUTTON_1;  // GPIO 0  (BOOT)  -> physical BOTTOM -> scroll down
+  _top.pin    = PIN_BUTTON_2;  // GPIO 21 -> physical TOP
+  _bottom.pin = PIN_BUTTON_1;  // GPIO 0  -> physical BOTTOM
   _top.state    = _bottom.state    = IDLE;
   _top.debounced = _bottom.debounced = false;
   _top.lastRaw  = _bottom.lastRaw  = false;
   _top.lastRawChange  = _bottom.lastRawChange  = 0;
   _top.pressStart    = _bottom.pressStart    = 0;
-  _top.releaseTime   = _bottom.releaseTime   = 0;
-  _top.longConsumed  = _bottom.longConsumed  = false;
-  _bothLongFired = false;
+  _top.longFired  = _bottom.longFired  = false;
+  _bothFired = false;
   _pending = EVENT_NONE;
   pinMode(_top.pin, INPUT_PULLUP);
   pinMode(_bottom.pin, INPUT_PULLUP);
 }
 
-void ButtonManager::step(Btn &b, ButtonEvent clickEvt, ButtonEvent doubleClickEvt) {
+void ButtonManager::step(Btn &b, ButtonEvent clickEvt, ButtonEvent longEvt) {
   uint32_t now = millis();
-
-  // ARMED timeout: no second click came within the double-click window
-  if (b.state == ARMED && now - b.releaseTime > DOUBLE_CLICK_MS) {
-    emit(clickEvt);
-    b.state = IDLE;
-  }
 
   // Debounce raw read
   bool raw = (digitalRead(b.pin) == LOW);  // active low
@@ -66,75 +54,55 @@ void ButtonManager::step(Btn &b, ButtonEvent clickEvt, ButtonEvent doubleClickEv
       if (pressed) {
         b.state = DOWN;
         b.pressStart = now;
-        b.longConsumed = false;
+        b.longFired = false;
       }
       break;
+
     case DOWN:
-      if (!pressed) {
-        if (b.longConsumed) {
-          b.state = IDLE;  // was absorbed by both-long-press
-        } else if (now - b.pressStart < SHORT_PRESS_MAX_MS) {
-          b.state = ARMED;
-          b.releaseTime = now;
-        } else {
-          b.state = IDLE;  // long single-button press, unused
-        }
+      // Check for long press while held
+      if (pressed && !b.longFired && (now - b.pressStart >= LONG_PRESS_MS)) {
+        emit(longEvt);
+        b.longFired = true;
+        b.state = LONG_FIRED;
+      }
+      // Released before long threshold -> click
+      if (!pressed && !b.longFired) {
+        emit(clickEvt);
+        b.state = IDLE;
       }
       break;
-    case ARMED:
-      if (pressed) {
-        if (now - b.releaseTime < DOUBLE_CLICK_MS) {
-          // ponytail: fire on second tap (press down), not on release — feels like
-          // a real double-tap instead of "press and hold the second time".
-          emit(doubleClickEvt);
-          b.state = DOWN2;
-          b.pressStart = now;
-          b.longConsumed = true;  // suppress emit on release
-        } else {
-          // window expired, emit click and start new press
-          emit(clickEvt);
-          b.state = DOWN;
-          b.pressStart = now;
-          b.longConsumed = false;
-        }
-      }
-      break;
-    case DOWN2:
+
+    case LONG_FIRED:
+      // Wait for release; event already fired
       if (!pressed) {
-        if (b.longConsumed) {
-          b.state = IDLE;
-        } else {
-          emit(doubleClickEvt);
-          b.state = IDLE;
-        }
+        b.state = IDLE;
       }
       break;
   }
 }
 
 void ButtonManager::update() {
-  // TOP button: scroll up (single click) + select (double-click)
-  step(_top,    EVENT_TOP_CLICK,       EVENT_TOP_DOUBLE_CLICK);
-  // BOTTOM button: scroll down only (no double-click action)
-  step(_bottom, EVENT_BOTTOM_CLICK,    EVENT_NONE);
+  step(_top,    EVENT_TOP_CLICK,    EVENT_TOP_LONG_PRESS);
+  step(_bottom, EVENT_BOTTOM_CLICK, EVENT_BOTTOM_LONG_PRESS);
 
-  // Both-press: fire as soon as both are held, no hold duration.
-  // Require near-simultaneous press (within SIMULTANEOUS_MS) so scrolling with
-  // one button then accidentally pressing the other doesn't trigger menu entry.
-  bool topHeld    = (_top.state    == DOWN || _top.state    == DOWN2);
-  bool bottomHeld = (_bottom.state == DOWN || _bottom.state == DOWN2);
-  if (topHeld && bottomHeld && !_bothLongFired) {
+  // Both-press: both held and pressed within SIMULTANEOUS_MS of each other.
+  // Fire as soon as the later one crosses the debounce (no hold duration).
+  bool topDown    = (_top.state    == DOWN);
+  bool bottomDown = (_bottom.state == DOWN);
+  if (topDown && bottomDown && !_bothFired) {
     uint32_t earlier = min(_top.pressStart, _bottom.pressStart);
     uint32_t later   = max(_top.pressStart, _bottom.pressStart);
     if (later - earlier <= SIMULTANEOUS_MS) {
-      emit(EVENT_BOTH_LONG_PRESS);
-      _bothLongFired = true;
-      _top.longConsumed    = true;  // suppress click/double-click on their release
-      _bottom.longConsumed = true;
+      emit(EVENT_BOTH_PRESS);
+      _bothFired = true;
+      _top.longFired    = true;  // suppress long press / click on release
+      _bottom.longFired = true;
+      _top.state    = LONG_FIRED;
+      _bottom.state = LONG_FIRED;
     }
   }
-  if (!topHeld || !bottomHeld) {
-    _bothLongFired = false;
+  if (!topDown && !bottomDown) {
+    _bothFired = false;
   }
 }
 

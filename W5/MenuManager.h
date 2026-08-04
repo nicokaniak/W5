@@ -10,9 +10,17 @@ enum AppMode {
   MODE_STOPWATCH,
   MODE_WEATHER,
   MODE_CONFIG,
-  MODE_MENU_STYLE,  // sub-screen of CONFIG: pick the rotary menu visual style
-  MODE_TRANSITION,  // ponytail: dive/zoom animation between menu and selected screen
+  MODE_MENU_STYLE,   // sub-screen of CONFIG: pick the rotary menu visual style
+  MODE_BRIGHTNESS,   // sub-screen of CONFIG: adjust screen brightness
+  MODE_TRANSITION,   // ponytail: dive/zoom animation between menu and selected screen
 };
+
+// ponytail: 16 discrete brightness levels map linearly to the RM67162's 0..255
+// DBV range (level * 17 -> 0,17,...,255). 16 is enough granularity for a small
+// AMOLED and keeps the picker UI as a simple 16-segment bar. Ceiling: the panel
+// response is non-linear below ~30 DBV; if perceptual uniformity is needed,
+// swap the linear map for a gamma LUT without touching the picker.
+static const uint8_t BRIGHTNESS_LEVELS = 16;
 
 // ponytail: rotary menu visual styles. Add new styles here AND in
 // MENU_STYLE_LABELS (MenuManager.cpp) AND implement a renderer in
@@ -47,6 +55,11 @@ public:
   static const char* menuStyleLabel(uint8_t i);     // "HUD", "HOLO", ...
   static uint8_t   menuStyleCount();
 
+  // Brightness picker (sub-screen of CONFIG)
+  static uint8_t   brightness();                    // current persisted level (0..15)
+  static void      setBrightness(uint8_t level);    // persist to NVS + apply to panel
+  static uint8_t   brightnessPickerIndex();         // live picker cursor (not yet applied)
+
   // Scroll animation
   static bool    isAnimating();
   static int8_t  scrollDir();       // -1 = scrolling up, +1 = scrolling down, 0 = idle
@@ -67,6 +80,8 @@ private:
   static uint32_t  _animStartTime;
   static MenuStyle _menuStyle;          // persisted style, loaded at init
   static MenuStyle _stylePickerIndex;   // live cursor in MODE_MENU_STYLE
+  static uint8_t   _brightness;         // persisted level (0..15), loaded at init
+  static uint8_t   _brightnessPicker;   // live cursor in MODE_BRIGHTNESS
   static AppMode   _pendingMode;        // target screen during MODE_TRANSITION
   static void      startScroll(int8_t dir);
   static void      runWifiPortal();

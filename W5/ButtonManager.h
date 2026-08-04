@@ -3,22 +3,25 @@
 
 #include <Arduino.h>
 
+// ponytail: click + long-press model (industry standard for two-button devices).
+// No double-click — single clicks fire instantly with zero delay.
 enum ButtonEvent {
   EVENT_NONE = 0,
-  EVENT_TOP_CLICK,            // top button single click    -> scroll up
-  EVENT_BOTTOM_CLICK,         // bottom button single click -> scroll down
-  EVENT_TOP_DOUBLE_CLICK,     // top button double click    -> select
-  EVENT_BOTH_LONG_PRESS,      // both pressed simultaneously  -> enter/exit menu
+  EVENT_TOP_CLICK,            // top button click         -> scroll up
+  EVENT_BOTTOM_CLICK,         // bottom button click      -> scroll down
+  EVENT_TOP_LONG_PRESS,       // top button hold ~600ms   -> select / enter
+  EVENT_BOTTOM_LONG_PRESS,    // bottom button hold ~600ms -> go back
+  EVENT_BOTH_PRESS,           // both pressed together    -> enter/exit menu
 };
 
 class ButtonManager {
 public:
   static void init();
-  static void update();             // call every loop iteration (~50Hz)
+  static void update();             // call every loop iteration
   static ButtonEvent pollEvent();   // returns next event or EVENT_NONE
 
 private:
-  enum BtnState { IDLE, DOWN, ARMED, DOWN2 };
+  enum BtnState { IDLE, DOWN, LONG_FIRED };
   struct Btn {
     uint8_t  pin;
     BtnState state;
@@ -26,15 +29,14 @@ private:
     bool     lastRaw;
     uint32_t lastRawChange;
     uint32_t pressStart;
-    uint32_t releaseTime;
-    bool     longConsumed;
+    bool     longFired;
   };
   static Btn _top;
   static Btn _bottom;
-  static bool _bothLongFired;
+  static bool _bothFired;
   static ButtonEvent _pending;
   static void emit(ButtonEvent e);
-  static void step(Btn &b, ButtonEvent clickEvt, ButtonEvent doubleClickEvt);
+  static void step(Btn &b, ButtonEvent clickEvt, ButtonEvent longEvt);
 };
 
 #endif

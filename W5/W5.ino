@@ -138,6 +138,16 @@ void loop() {
       }
       break;
     }
+    case MODE_BRIGHTNESS: {
+      // Brightness picker: redraw on change. No ambient effects, so only redraw
+      // when dirty (the live preview is driven by lcd_brightness(), not the UI).
+      bool force = MenuManager::consumeDirty();
+      if (force || now - lastMenuRedraw >= MENU_REDRAW_MS) {
+        DisplayManager::drawBrightnessPicker(MenuManager::brightnessPickerIndex());
+        lastMenuRedraw = now;
+      }
+      break;
+    }
     case MODE_STOPWATCH: {
       // Redraw on mode entry / state change, or at 20Hz while running so the
       // centiseconds tick. Idle/stopped screens are static (no periodic redraw).
