@@ -14,16 +14,13 @@
 #include "icons.h" // 1-bit PROGMEM menu icons (generated from icons/*.png)
 #include "weather_icons.h" // 1-bit PROGMEM weather icons (generated from icons/weather/*.png)
 #include "legend_icons.h" // 1-bit PROGMEM legend icons (generated from icons/*.png)
+#include "face_icons.h" // 1-bit PROGMEM watch-face icons (thermometer/sunrise/sunset, 24x24)
 #include "rm67162.h" // For lcd_PushColors
 #include <math.h>
 #include <WiFi.h>
 
 static RM67162Display display;
 GFXcanvas16 *DisplayManager::canvas = nullptr;
-
-// ponytail: suppresses lcd_PushColors when drawTransition needs to compose two
-// screens on the canvas before a single push. Single-threaded loop, no guard needed.
-static bool s_noPush = false;
 
 // ----- Starfield watch face helpers -----
 // Adapted from watchy-starfield-main: 7-seg digit bitmaps, moon phase,
@@ -370,7 +367,6 @@ void DisplayManager::initDisplay() {
 }
 
 void DisplayManager::pushToDisplay() {
-  if (s_noPush) return;
   if (canvas) {
     lcd_PushColors(0, 0, canvas->width(), canvas->height(),
                    canvas->getBuffer());
@@ -646,26 +642,27 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
     int ssH = ss / 60, ssM = ss % 60;
 
     // Right-aligned to the progress bar's right edge (timeX + clockW).
-    const int16_t labelW = 35;    // "SR"/"SS" at size 3 (16x25, gap 3)
+    // ponytail: 24x24 sunrise/sunset icons replace the old "SR"/"SS" text labels.
+    const int16_t iconW = 24, iconH = 24;
     const int16_t labelGap = 4;
-    // Block width: label + gap + HH digits + colon gap + MM digits
-    const int16_t ssW = labelW + labelGap + 2*(16+3) + 4 + (2*(16+3) - 3); // 116
+    // Block width: icon + gap + HH digits + colon gap + MM digits
+    const int16_t ssW = iconW + labelGap + 2*(16+3) + 4 + (2*(16+3) - 3); // 105
     const int16_t ssX = timeX + clockW - ssW; // right-aligned to bar
-    const int16_t digitX = ssX + labelW + labelGap;
+    const int16_t digitX = ssX + iconW + labelGap;
     const int16_t srY = 178;      // aligned with date group top row
     const int16_t ssY = 178 + 25 + 4; // aligned with date group bottom row
-    const int16_t labelYOff = 0;  // size-3 label is 25px, same as row
+    const int16_t iconYOff = 0;  // 24px icon in 25px row, ~centered
 
-    // SR
-    drawText7seg(canvas, "SR", ssX, srY + labelYOff, 3, LABEL_COLOR);
+    // SR (sunrise icon)
+    canvas->drawBitmap(ssX, srY + iconYOff, FICON_SUNRISE, iconW, iconH, SUN_COLOR);
     drawSmallDigits(canvas, srH, 2, digitX, srY, SUN_LABEL_COLOR);
     int16_t srColonX = digitX + 2 * (16 + 3);
     canvas->fillCircle(srColonX, srY + 8, 2, SUN_LABEL_COLOR);
     canvas->fillCircle(srColonX, srY + 16, 2, SUN_LABEL_COLOR);
     drawSmallDigits(canvas, srM, 2, srColonX + 4, srY, SUN_LABEL_COLOR);
 
-    // SS
-    drawText7seg(canvas, "SS", ssX, ssY + labelYOff, 3, LABEL_COLOR);
+    // SS (sunset icon)
+    canvas->drawBitmap(ssX, ssY + iconYOff, FICON_SUNSET, iconW, iconH, SUN_COLOR);
     drawSmallDigits(canvas, ssH, 2, digitX, ssY, SUN_LABEL_COLOR);
     int16_t ssColonX = digitX + 2 * (16 + 3);
     canvas->fillCircle(ssColonX, ssY + 8, 2, SUN_LABEL_COLOR);
@@ -710,12 +707,14 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
     canvas->fillTriangle(mx, barY, mx - 4, barY - 6, mx + 4, barY - 6, SUN_COLOR);
   }
 
-  // Temperature (yellow, right column, aligned vertically with SS time)
+  // Temperature (white, right column, aligned vertically with SS time)
+  // ponytail: 24x24 thermometer icon replaces the old "T:" text label.
   const uint16_t TEMP_COLOR = 0xFFFF; // white
+  const int16_t TICON_W = 24, TICON_H = 24;
   String tempStr = WeatherManager::getTemperature();
   bool tempValid = tempStr.length() > 0 && isDigit(tempStr.charAt(0));
   if (tempValid) {
-    drawText7seg(canvas, "T:", rightX, 207, 2, LABEL_COLOR);
+    canvas->drawBitmap(rightX, 207, FICON_THERMOMETER, TICON_W, TICON_H, TEMP_COLOR);
     int dotPos = tempStr.indexOf('.');
     int tempInt = (dotPos > 0) ? tempStr.substring(0, dotPos).toInt()
                                 : tempStr.toInt();
@@ -727,7 +726,8 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
     }
     drawText7seg(canvas, "C", rightX + 2 * (16 + 3) + 44, 207, 2, TEMP_COLOR);
   } else {
-    drawText7seg(canvas, "T:--", rightX, 207, 2, LABEL_COLOR);
+    canvas->drawBitmap(rightX, 207, FICON_THERMOMETER, TICON_W, TICON_H, LABEL_COLOR);
+    drawText7seg(canvas, "--", rightX + 24, 207, 2, LABEL_COLOR);
   }
 
   // --- Corner brackets around each section ---
@@ -744,7 +744,7 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
                      GLOBE_SIZE + 8, GLOBE_SIZE + 8, BRACKET_LEG, BRACKET_COLOR);
   // SR/SS inline times (right-aligned to progress bar)
   {
-    const int16_t ssW = 35 + 4 + 2*(16+3) + 4 + (2*(16+3) - 3); // 116
+    const int16_t ssW = 24 + 4 + 2*(16+3) + 4 + (2*(16+3) - 3); // 105
     drawCornerBrackets(canvas, timeX + clockW - ssW - 4, 174, ssW + 8, 62,
                        BRACKET_LEG, BRACKET_COLOR);
   }
@@ -1553,23 +1553,21 @@ void DisplayManager::drawMenu(uint8_t selectedIndex, int8_t scrollDir, float t) 
   pushToDisplay();
 }
 
-// ponytail: dive/zoom transition. The selected menu item sits at angle 0 on the
-// arc → (MENU_CX + MENU_R, MENU_CY) = (115, 120). A bracket contracts from
-// fullscreen into a small rect around that point (phase 1), the content swaps
-// from menu to the target screen at the midpoint, then the bracket expands back
-// to fullscreen (phase 2). Area outside the bracket is blacked out so it reads
-// as "flying into the selected item." Ceiling: no real camera/scale transform —
-// the content inside the bracket is a fresh redraw, not a zoom of the menu. The
-// bracket edge reaching the screen border at the midpoint masks the content swap.
-void DisplayManager::drawTransition(AppMode fromMode, AppMode toMode,
-                                    uint8_t selectedIndex, float progress) {
+// ponytail: dive/zoom transition. A bracket contracts from fullscreen into a
+// small rect at the selected menu item's arc position (phase 1), then expands
+// back to fullscreen (phase 2). The content inside is just the item label —
+// not a full screen redraw. The full menu/watch/weather renderers take 15-30ms
+// each, which plus the 27ms SPI push gave only 6-8 frames over the 350ms
+// animation (smoothstep has zero velocity at endpoints → bracket appeared
+// frozen for 100ms+ at start/end). Drawing just a label drops content draw to
+// ~1ms, giving ~12 frames. The real screen draws when the transition resolves.
+void DisplayManager::drawTransition(uint8_t selectedIndex, float progress) {
   if (!canvas) return;
   GFXcanvas16 *c = canvas;
 
   // Selected item center on the menu arc (angle = 0).
   const int16_t sx = MENU_CX + MENU_R;  // 115
   const int16_t sy = MENU_CY;           // 120
-  // Contracted rect: small box around the selected reticle.
   const int16_t tw = 24, th = 24;
   const int16_t tx = sx - tw / 2, ty = sy - th / 2;
   const int16_t fw = c->width(), fh = c->height();
@@ -1590,18 +1588,14 @@ void DisplayManager::drawTransition(AppMode fromMode, AppMode toMode,
     rw = lerpI(tw, fw, p); rh = lerpI(th, fh, p);
   }
 
-  // Draw the content (menu in phase 1, target screen in phase 2) without pushing.
-  s_noPush = true;
-  AppMode contentMode = phase1 ? fromMode : toMode;
-  switch (contentMode) {
-    case MODE_MENU:       drawMenu(selectedIndex); break;
-    case MODE_WATCH:      drawWatchFace(TimeManager::getCurrentTime()); break;
-    case MODE_STOPWATCH:  drawStopwatch(); break;
-    case MODE_WEATHER:    drawWeatherScreen(); break;
-    case MODE_CONFIG:     drawConfigMenu(MenuManager::configSelectedIndex()); break;
-    default:              c->fillScreen(0x0000); break;
-  }
-  s_noPush = false;
+  // Content: just the selected item label, centered. Color shifts cyan→yellow
+  // at the midpoint to signal the content swap without an expensive redraw.
+  c->fillScreen(0x0000);
+  const char* label = MenuManager::menuItemLabel(selectedIndex);
+  uint16_t labelCol = phase1 ? 0x07FF : 0xFFE0;  // cyan → yellow
+  uint16_t lw, lh;
+  text7segBounds(label, 4, &lw, &lh);
+  drawText7seg(c, label, (fw - lw) / 2, (fh - lh) / 2, 4, labelCol);
 
   // Mask outside the bracket rect with black (4 strips).
   c->fillRect(0, 0, fw, ry, 0x0000);                  // top

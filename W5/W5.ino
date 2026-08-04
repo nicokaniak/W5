@@ -124,8 +124,7 @@ void loop() {
       // Dive/zoom: redraw every frame until the animation finishes, then
       // updateAnimation() resolves _mode into the target screen.
       MenuManager::updateAnimation();
-      DisplayManager::drawTransition(MODE_MENU, MenuManager::pendingMode(),
-                                     MenuManager::selectedIndex(),
+      DisplayManager::drawTransition(MenuManager::selectedIndex(),
                                      MenuManager::animProgress());
       lastMenuRedraw = now;
       break;
