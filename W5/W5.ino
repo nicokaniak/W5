@@ -66,9 +66,11 @@ void setup() {
 
   TimeManager::initTime();
 
-  // ponytail: fetch weather immediately at boot so the first weather-screen open
-  // has data; otherwise the user waits up to 10 min for the periodic refresh.
-  WeatherManager::updateWeather();
+  // ponytail: fetch weather immediately at boot (sync) so the first weather-screen
+  // open has data; otherwise the user waits up to 10 min for the periodic refresh.
+  // Subsequent calls from loop() use the default async=true so the 16s HTTP
+  // window runs on the fetch task (core 0) and doesn't stall button polling.
+  WeatherManager::updateWeather(false);
   lastWeatherFetch = millis();
 
   BluetoothManager::initBluetooth();
@@ -179,5 +181,9 @@ void loop() {
       break;
   }
 
-  delay(10); // ~100Hz — doubles animation frame rate vs 50Hz for smoother scrolling
+  // ponytail: 10ms keeps button polling at ~100Hz (debounce window is 20ms, so
+  // 50Hz would also catch every transition, but the extra headroom costs nothing
+  // — the ESP32 isn't sleep-bound here). Redraw paths are independently throttled
+  // to 20-50Hz via the *_REDRAW_MS constants, so this only affects input latency.
+  delay(10);
 }

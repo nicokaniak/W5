@@ -16,10 +16,11 @@ struct HourlyForecast {
 class WeatherManager {
 public:
   static void initWeather();
-  static void updateWeather();
+  static void updateWeather(bool async = true);
+  static bool isFetching();
   static String getTemperature();
 
-  static const HourlyForecast& getHourlyForecast();
+  static HourlyForecast getHourlyForecast();
   static bool hasHourlyData();
 };
 
