@@ -1,6 +1,4 @@
 #include "TimeManager.h"
-#include "DisplayManager.h"
-
 #include "pins_config.h"
 #include <HTTPClient.h>
 #include <WiFi.h>
@@ -171,8 +169,3 @@ void TimeManager::updateTime() {
 
 String TimeManager::getCurrentTime() { return currentTime; }
 String TimeManager::getCurrentDate() { return currentDate; }
-
-void TimeManager::drawWatchFace(const String &timeStr) {
-  DisplayManager::clearDisplay();
-  DisplayManager::drawText(timeStr, 10, 30);
-}

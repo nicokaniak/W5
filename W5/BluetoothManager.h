@@ -6,8 +6,6 @@
 class BluetoothManager {
 public:
   static void initBluetooth();
-  static void checkNotifications();
-  static bool hasNewNotification();
   static String getNotification();
   static bool isConnected();
 };

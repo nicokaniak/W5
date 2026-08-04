@@ -1,7 +1,6 @@
 #include <Arduino.h>
 #include <driver/gpio.h> // For GPIO hold functionality
 #include "config/config.h"
-#include "AlarmManager.h"
 #include "BatteryManager.h"
 #include "BluetoothManager.h"
 #include "ButtonManager.h"
@@ -72,7 +71,6 @@ void setup() {
   WeatherManager::updateWeather();
   lastWeatherFetch = millis();
 
-  AlarmManager::initAlarms();
   BluetoothManager::initBluetooth();
   ButtonManager::init();
   MenuManager::init();
@@ -94,8 +92,6 @@ void loop() {
       bool force = MenuManager::consumeDirty();
       if (force || now - lastWatchRedraw >= WATCH_REDRAW_MS) {
         TimeManager::updateTime();
-        AlarmManager::checkAlarms();
-        BluetoothManager::checkNotifications();
         DisplayManager::drawWatchFace(TimeManager::getCurrentTime());
         lastWatchRedraw = now;
       }
@@ -124,6 +120,16 @@ void loop() {
         lastMenuRedraw = now;
       }
       break;
+    case MODE_TRANSITION: {
+      // Dive/zoom: redraw every frame until the animation finishes, then
+      // updateAnimation() resolves _mode into the target screen.
+      MenuManager::updateAnimation();
+      DisplayManager::drawTransition(MODE_MENU, MenuManager::pendingMode(),
+                                     MenuManager::selectedIndex(),
+                                     MenuManager::animProgress());
+      lastMenuRedraw = now;
+      break;
+    }
     case MODE_MENU_STYLE: {
       // Style picker: redraw on change or at 20fps for the reticle/ambient feel.
       bool force = MenuManager::consumeDirty();

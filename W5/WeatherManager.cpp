@@ -5,10 +5,7 @@
 #include <WiFi.h>
 #include <time.h>
 
-static String weatherInfo = "No data";
 static String temperature = "--";
-static String windSpeed = "--";
-static String weatherDescription = "Unknown";
 
 static HourlyForecast hourlyForecast;
 static bool hourlyValid = false;
@@ -168,16 +165,7 @@ void WeatherManager::updateWeather() {
         int start = tempIdx + 14;
         int end = payload.indexOf(",", start);
         temperature = payload.substring(start, end);
-        weatherInfo = "Temp: " + temperature + " °C";
-        Serial.println("Weather updated: " + weatherInfo);
-      }
-
-      // Parse wind speed
-      int windIdx = payload.indexOf("\"windspeed\":", cwIdx);
-      if (windIdx != -1) {
-        int start = windIdx + 12;
-        int end = payload.indexOf(",", start);
-        windSpeed = payload.substring(start, end);
+        Serial.println("Weather updated: " + temperature + " °C");
       }
 
       // Parse weather code
@@ -189,21 +177,17 @@ void WeatherManager::updateWeather() {
           end = payload.indexOf("}", start);
         String codeStr = payload.substring(start, end);
         int code = codeStr.toInt();
-        weatherDescription = getWeatherCodeDescription(code);
+        Serial.printf("Weather code: %d (%s)\n", code, getWeatherCodeDescription(code).c_str());
       }
 
     } else {
       Serial.println("Weather API request failed");
       temperature = "Error";
-      windSpeed = "Error";
-      weatherDescription = "API Error";
     }
     http.end();
   } else {
     Serial.println("WiFi not connected");
     temperature = "No WiFi";
-    windSpeed = "No WiFi";
-    weatherDescription = "No WiFi";
   }
 
   fetchHourlyForecast();
@@ -345,13 +329,7 @@ static void fetchHourlyForecast() {
                 count, count > 0 ? hourlyForecast.hour[0] : -1);
 }
 
-String WeatherManager::getWeatherInfo() { return weatherInfo; }
-
 String WeatherManager::getTemperature() { return temperature; }
-
-String WeatherManager::getWindSpeed() { return windSpeed; }
-
-String WeatherManager::getWeatherDescription() { return weatherDescription; }
 
 const HourlyForecast& WeatherManager::getHourlyForecast() { return hourlyForecast; }
 

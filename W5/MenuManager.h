@@ -11,6 +11,7 @@ enum AppMode {
   MODE_WEATHER,
   MODE_CONFIG,
   MODE_MENU_STYLE,  // sub-screen of CONFIG: pick the rotary menu visual style
+  MODE_TRANSITION,  // ponytail: dive/zoom animation between menu and selected screen
 };
 
 // ponytail: rotary menu visual styles. Add new styles here AND in
@@ -52,6 +53,9 @@ public:
   static float   animProgress();    // 0.0 to 1.0 (eased)
   static void    updateAnimation(); // call each loop tick; marks done when finished
 
+  // Dive/zoom transition (menu -> selected screen)
+  static AppMode pendingMode();     // target screen the transition resolves into
+
 private:
   static AppMode   _mode;
   static uint8_t   _selectedIndex;
@@ -63,6 +67,7 @@ private:
   static uint32_t  _animStartTime;
   static MenuStyle _menuStyle;          // persisted style, loaded at init
   static MenuStyle _stylePickerIndex;   // live cursor in MODE_MENU_STYLE
+  static AppMode   _pendingMode;        // target screen during MODE_TRANSITION
   static void      startScroll(int8_t dir);
   static void      runWifiPortal();
 };

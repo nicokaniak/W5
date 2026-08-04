@@ -1,6 +1,5 @@
 #include "DisplayManager.h"
 #include "BatteryManager.h"
-#include "BluetoothManager.h"
 #include "RM67162Display.h"
 #include "MenuManager.h"
 #include "StopwatchManager.h"
@@ -14,12 +13,17 @@
 #include "battery_icons.h" // 1-bit battery state icons (generated from icons/battery/*.png)
 #include "icons.h" // 1-bit PROGMEM menu icons (generated from icons/*.png)
 #include "weather_icons.h" // 1-bit PROGMEM weather icons (generated from icons/weather/*.png)
+#include "legend_icons.h" // 1-bit PROGMEM legend icons (generated from icons/*.png)
 #include "rm67162.h" // For lcd_PushColors
 #include <math.h>
 #include <WiFi.h>
 
 static RM67162Display display;
 GFXcanvas16 *DisplayManager::canvas = nullptr;
+
+// ponytail: suppresses lcd_PushColors when drawTransition needs to compose two
+// screens on the canvas before a single push. Single-threaded loop, no guard needed.
+static bool s_noPush = false;
 
 // ----- Starfield watch face helpers -----
 // Adapted from watchy-starfield-main: 7-seg digit bitmaps, moon phase,
@@ -35,22 +39,6 @@ static inline uint32_t lcg16() {
   return (s_starSeed >> 16) & 0x7FFF;
 }
 
-// Draw n deterministic stars onto the canvas. Sizes vary 1-2px for depth.
-static void drawStarfield(GFXcanvas16 *c, int n) {
-  s_starSeed = 0x1234ABCD; // reset for determinism
-  for (int i = 0; i < n; i++) {
-    int16_t x = (int16_t)(lcg16() % c->width());
-    int16_t y = (int16_t)(lcg16() % c->height());
-    uint8_t  r = (lcg16() & 1) ? 2 : 1;
-    // Dim white/blue stars for depth — RGB565
-    uint16_t col = (lcg16() & 3) == 0 ? 0xBDF7 : 0xFFFF; // 25% bluish, rest white
-    if (r == 1)
-      c->drawPixel(x, y, col);
-    else
-      c->fillCircle(x, y, 1, col);
-  }
-}
-
 // 7-seg big digit (33x53) lookup. fd_0..fd_9 from starfield_icons.h.
 static const unsigned char *fdDigits[] = {
   fd_0, fd_1, fd_2, fd_3, fd_4, fd_5, fd_6, fd_7, fd_8, fd_9
@@ -64,20 +52,6 @@ static const unsigned char *numDigits[] = {
   num_0, num_1, num_2, num_3, num_4, num_5, num_6, num_7, num_8, num_9
 };
 
-// Draw a multi-digit 7-seg number at (x,y) using big 33x53 bitmaps.
-// Returns the total width drawn.
-static int drawBigDigits(GFXcanvas16 *c, int value, int nDigits,
-                         int16_t x, int16_t y, uint16_t color) {
-  const int dw = 33, dh = 53, gap = 4;
-  for (int i = nDigits - 1; i >= 0; i--) {
-    int d = value % 10;
-    value /= 10;
-    int16_t dx = x + i * (dw + gap);
-    c->drawBitmap(dx, y, fdDigits[d], dw, dh, color);
-  }
-  return nDigits * (dw + gap) - gap;
-}
-
 // Draw a multi-digit 7-seg number at (x,y) using small 16x25 bitmaps.
 static int drawSmallDigits(GFXcanvas16 *c, int value, int nDigits,
                            int16_t x, int16_t y, uint16_t color) {
@@ -89,18 +63,6 @@ static int drawSmallDigits(GFXcanvas16 *c, int value, int nDigits,
     c->drawBitmap(dx, y, ddDigits[d], dw, dh, color);
   }
   return nDigits * (dw + gap) - gap;
-}
-
-// Draw a 3x5 tiny digit at (x,y) — used for sunrise/sunset HH:MM.
-static void drawTinyDigits(GFXcanvas16 *c, int value, int nDigits,
-                           int16_t x, int16_t y, uint16_t color) {
-  const int dw = 3, dh = 5, gap = 1;
-  for (int i = nDigits - 1; i >= 0; i--) {
-    int d = value % 10;
-    value /= 10;
-    int16_t dx = x + i * (dw + gap);
-    c->drawBitmap(dx, y, numDigits[d], dw, dh, color);
-  }
 }
 
 // Draw small L-shaped corner brackets around a bounding box.
@@ -159,15 +121,6 @@ static void drawBigDigitsScaled(GFXcanvas16 *c, int value, int nDigits,
   }
 }
 
-// Width of a 7-seg string (big 33x53, scaled). Same advance as drawBigText7seg.
-static int bigText7segWidth(const char *s, int scale, int gap) {
-  const int dw = 33;
-  int step = dw * scale + gap;
-  int n = 0;
-  for (const char *p = s; *p; p++) n++;
-  return n > 0 ? n * step - gap : 0;
-}
-
 // Draw a mixed alphanumeric 7-seg string using big 33x53 bitmaps, scaled.
 // Handles digits 0-9, letters/punctuation from sevenseg_letters.h, ':'
 // (two round dots via fillCircle for cleaner look), and ' ' (gap).
@@ -198,15 +151,6 @@ static int drawBigText7seg(GFXcanvas16 *c, const char *s,
     cx += step;
   }
   return cx - x - gap;
-}
-
-// Width of a 7-seg string (small 16x25). Same advance as drawSmallText7seg.
-static int smallText7segWidth(const char *s, int gap) {
-  const int dw = 16;
-  int step = dw + gap;
-  int n = 0;
-  for (const char *p = s; *p; p++) n++;
-  return n > 0 ? n * step - gap : 0;
 }
 
 // Draw a mixed alphanumeric 7-seg string using small 16x25 bitmaps.
@@ -262,14 +206,6 @@ static int drawSmallText7segScaled(GFXcanvas16 *c, const char *s,
     cx += step;
   }
   return cx - x - gap;
-}
-
-static int smallText7segScaledWidth(const char *s, int scale, int gap) {
-  const int dw = 16;
-  int step = dw * scale + gap;
-  int n = 0;
-  for (const char *p = s; *p; p++) n++;
-  return n > 0 ? n * step - gap : 0;
 }
 
 // --- 7-seg text rendering (replaces former dot-matrix renderer) ---
@@ -434,24 +370,11 @@ void DisplayManager::initDisplay() {
 }
 
 void DisplayManager::pushToDisplay() {
+  if (s_noPush) return;
   if (canvas) {
     lcd_PushColors(0, 0, canvas->width(), canvas->height(),
                    canvas->getBuffer());
   }
-}
-
-void DisplayManager::clearDisplay() {
-  if (canvas)
-    canvas->fillScreen(0x0000);
-  pushToDisplay();
-}
-
-void DisplayManager::drawText(const String &text, int x, int y) {
-  if (!canvas)
-    return;
-  canvas->fillScreen(0x0000);
-  drawText7seg(canvas, text.c_str(), x, y, 3, 0xFFFF); // white, size 3
-  pushToDisplay();
 }
 
 // ISO 8601 week number from a filled struct tm.
@@ -826,7 +749,9 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
                        BRACKET_LEG, BRACKET_COLOR);
   }
   // Temperature (right column, aligned with SS time)
-  drawCornerBrackets(canvas, rightX - 4, 203, 84, 33, BRACKET_LEG,
+  // ponytail: width matches the globe bracket above so the stacked brackets
+  // share the same right edge, and it encompasses the trailing "C" unit.
+  drawCornerBrackets(canvas, rightX - 4, 203, GLOBE_SIZE + 8, 33, BRACKET_LEG,
                      BRACKET_COLOR);
 
   // Push buffer to display
@@ -1048,129 +973,27 @@ void DisplayManager::drawWeatherScreen() {
   }
 
   // --- Legend + location (single row at y=218) ---
+  // ponytail: 12x12 1-bit icons replace the old square/line swatches.
+  // Icons are sized to match the former swatch footprint so the row layout
+  // is unchanged. Ceiling: 12px is tight for detail; glyphs are simple
+  // enough to read at this size.
   const int16_t legendY = 218;
-  // Precipitation swatch
-  canvas->fillRect(10, legendY, 12, 12, PRECIP_COLOR);
+  const int16_t legendIcon = 12;
+
+  // Precipitation (was blue square) — droplet icon in precip color
+  canvas->drawBitmap(10, legendY, LICON_DROPLETS, legendIcon, legendIcon, PRECIP_COLOR);
   drawText7seg(canvas, "Rain", 28, legendY - 2, 1, 0x7BEF);
 
-  // Temperature swatch (line)
-  canvas->drawLine(90, legendY + 6, 102, legendY + 6, TEMP_COLOR);
-  canvas->fillCircle(96, legendY + 6, 2, TEMP_COLOR);
+  // Temperature (was red line) — thermometer icon in temp color
+  canvas->drawBitmap(90, legendY, LICON_THERMOMETER, legendIcon, legendIcon, TEMP_COLOR);
   drawText7seg(canvas, "Temp", 108, legendY - 2, 1, 0x7BEF);
 
-  // --- Location (right-aligned) ---
-  drawText7seg(canvas, "Copenhagen", canvas->width() - 90, legendY - 2, 1, 0x7BEF);
-
-  pushToDisplay();
-}
-
-void DisplayManager::drawAlarmsScreen() {
-  if (!canvas)
-    return;
-
-  canvas->fillScreen(0x0000);
-
-  // Title
-  drawText7seg(canvas, "ALARMS", 10, 10, 3, 0xF81F); // magenta, size 3
-
-  // Alarm info
-  drawText7seg(canvas, "Alarm 1: --:--", 10, 50, 2, 0xFFFF); // white
-  drawText7seg(canvas, "Status: Inactive", 10, 80, 2, 0xFFFF);
-
-  // Note
-  drawText7seg(canvas, "Use app to set alarms", 10, 120, 1, 0x7BEF); // gray
-
-  pushToDisplay();
-}
-
-void DisplayManager::drawBatteryScreen() {
-  if (!canvas)
-    return;
-
-  canvas->fillScreen(0x0000);
-
-  // Title
-  drawText7seg(canvas, "BATTERY", 10, 10, 3, 0x07E0); // green, size 3
-
-  // Get battery data
-  float batVolt = BatteryManager::getVoltage();
-  int batPct = BatteryManager::getPercentage();
-
-  // Voltage
-  drawText7seg(canvas, ("Voltage: " + String(batVolt, 2) + "V").c_str(), 10, 50, 2,
-          0xFFFF); // white
-
-  // Percentage
-  drawText7seg(canvas, ("Charge: " + String(batPct) + "%").c_str(), 10, 80, 2,
-          0xFFFF);
-
-  // Large battery bar visualization
-  int barWidth = map(batPct, 0, 100, 0, 200); // max 200 px width
-  int barX = 10;
-  int barY = 120;
-
-  // Border
-  canvas->drawRect(barX - 2, barY - 2, 204, 34, 0xFFFF);
-
-  // Background (dark gray)
-  canvas->fillRect(barX, barY, 200, 30, 0x2104);
-
-  // Fill based on percentage
-  uint16_t barColor;
-  if (batPct > 50) {
-    barColor = 0x07E0; // green
-  } else if (batPct > 20) {
-    barColor = 0xFFE0; // yellow
-  } else {
-    barColor = 0xF800; // red
-  }
-  canvas->fillRect(barX, barY, barWidth, 30, barColor);
-
-  // Status text
-  drawText7seg(canvas, "GPIO15: Power enabled", 10, 170, 1, 0x7BEF); // gray
-
-  pushToDisplay();
-}
-
-void DisplayManager::drawBluetoothScreen() {
-  if (!canvas)
-    return;
-
-  canvas->fillScreen(0x0000);
-
-  // Title
-  drawText7seg(canvas, "BLUETOOTH", 10, 10, 3, 0x001F); // blue, size 3
-
-  // Connection status
-  bool connected = BluetoothManager::isConnected();
-
-  // "Status: " in white, then the state word in green/red on the same line.
-  drawText7seg(canvas, "Status: ", 10, 50, 2, 0xFFFF); // white
-  uint16_t stW, stH;
-  text7segBounds("Status: ", 2, &stW, &stH);
-  if (connected) {
-    drawText7seg(canvas, "Connected", 10 + (int16_t)stW, 50, 2, 0x07E0); // green
-  } else {
-    drawText7seg(canvas, "Disconnected", 10 + (int16_t)stW, 50, 2, 0xF800); // red
-  }
-
-  // Device Name
-  drawText7seg(canvas, "Device: Lilygo_Watch", 10, 80, 2, 0xFFFF); // white
-
-  // Notifications
-  drawText7seg(canvas, "Last Message:", 10, 110, 2, 0xFFFF);
-  String note = BluetoothManager::getNotification();
-  if (note.length() > 0) {
-    drawText7seg(canvas, note.c_str(), 10, 140, 1, 0xFFFF);
-  } else {
-    drawText7seg(canvas, "No new messages", 10, 140, 1, 0xFFFF);
-  }
-
-  // Instructions
-  if (!connected) {
-    drawText7seg(canvas, "Pair with 'Lilygo_Watch'", 10, 170, 1, 0x7BEF); // gray
-    drawText7seg(canvas, "Use Serial Bluetooth Terminal", 10, 185, 1, 0x7BEF);
-  }
+  // --- Location (right-aligned) with map-pin icon ---
+  const char *locStr = "Copenhagen";
+  const int16_t locX = canvas->width() - 90;
+  drawText7seg(canvas, locStr, locX, legendY - 2, 1, 0x7BEF);
+  // Pin sits just left of the city name, vertically centered on the text row
+  canvas->drawBitmap(locX - legendIcon - 2, legendY, LICON_MAP_PIN, legendIcon, legendIcon, 0x7BEF);
 
   pushToDisplay();
 }
@@ -1727,6 +1550,70 @@ void DisplayManager::drawMenu(uint8_t selectedIndex, int8_t scrollDir, float t) 
     case STYLE_MINIMAL: drawMenuMinimal(canvas, selectedIndex, scrollDir, t); break;
     default:            drawMenuHUD(canvas, selectedIndex, scrollDir, t);     break;
   }
+  pushToDisplay();
+}
+
+// ponytail: dive/zoom transition. The selected menu item sits at angle 0 on the
+// arc → (MENU_CX + MENU_R, MENU_CY) = (115, 120). A bracket contracts from
+// fullscreen into a small rect around that point (phase 1), the content swaps
+// from menu to the target screen at the midpoint, then the bracket expands back
+// to fullscreen (phase 2). Area outside the bracket is blacked out so it reads
+// as "flying into the selected item." Ceiling: no real camera/scale transform —
+// the content inside the bracket is a fresh redraw, not a zoom of the menu. The
+// bracket edge reaching the screen border at the midpoint masks the content swap.
+void DisplayManager::drawTransition(AppMode fromMode, AppMode toMode,
+                                    uint8_t selectedIndex, float progress) {
+  if (!canvas) return;
+  GFXcanvas16 *c = canvas;
+
+  // Selected item center on the menu arc (angle = 0).
+  const int16_t sx = MENU_CX + MENU_R;  // 115
+  const int16_t sy = MENU_CY;           // 120
+  // Contracted rect: small box around the selected reticle.
+  const int16_t tw = 24, th = 24;
+  const int16_t tx = sx - tw / 2, ty = sy - th / 2;
+  const int16_t fw = c->width(), fh = c->height();
+
+  const bool phase1 = (progress < 0.5f);
+  const float p = phase1 ? (progress * 2.0f) : ((progress - 0.5f) * 2.0f);
+
+  auto lerpI = [](int16_t a, int16_t b, float t) {
+    return (int16_t)(a + (b - a) * t + 0.5f);
+  };
+
+  int16_t rx, ry, rw, rh;
+  if (phase1) {
+    rx = lerpI(0, tx, p);  ry = lerpI(0, ty, p);
+    rw = lerpI(fw, tw, p); rh = lerpI(fh, th, p);
+  } else {
+    rx = lerpI(tx, 0, p);  ry = lerpI(ty, 0, p);
+    rw = lerpI(tw, fw, p); rh = lerpI(th, fh, p);
+  }
+
+  // Draw the content (menu in phase 1, target screen in phase 2) without pushing.
+  s_noPush = true;
+  AppMode contentMode = phase1 ? fromMode : toMode;
+  switch (contentMode) {
+    case MODE_MENU:       drawMenu(selectedIndex); break;
+    case MODE_WATCH:      drawWatchFace(TimeManager::getCurrentTime()); break;
+    case MODE_STOPWATCH:  drawStopwatch(); break;
+    case MODE_WEATHER:    drawWeatherScreen(); break;
+    case MODE_CONFIG:     drawConfigMenu(MenuManager::configSelectedIndex()); break;
+    default:              c->fillScreen(0x0000); break;
+  }
+  s_noPush = false;
+
+  // Mask outside the bracket rect with black (4 strips).
+  c->fillRect(0, 0, fw, ry, 0x0000);                  // top
+  c->fillRect(0, ry + rh, fw, fh - (ry + rh), 0x0000); // bottom
+  c->fillRect(0, ry, rx, rh, 0x0000);                 // left
+  c->fillRect(rx + rw, ry, fw - (rx + rw), rh, 0x0000); // right
+
+  // Bracket outline: solid cyan in phase 1, fading out in phase 2.
+  uint16_t bracketCol = phase1 ? 0x07FF : lerp565(0x07FF, 0x0000, p);
+  if (bracketCol != 0x0000)
+    drawCornerBrackets(c, rx, ry, rw, rh, 6, bracketCol);
+
   pushToDisplay();
 }
 

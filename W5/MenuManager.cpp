@@ -40,6 +40,7 @@ int8_t   MenuManager::_scrollDir     = 0;
 uint32_t MenuManager::_animStartTime = 0;
 MenuStyle MenuManager::_menuStyle       = STYLE_HUD;
 MenuStyle MenuManager::_stylePickerIndex = STYLE_HUD;
+AppMode   MenuManager::_pendingMode      = MODE_WATCH;
 
 void MenuManager::init() {
   _mode = MODE_WATCH;
@@ -56,10 +57,12 @@ void MenuManager::init() {
   if (s >= MENU_STYLE_COUNT) s = (uint8_t)STYLE_HUD;
   _menuStyle = (MenuStyle)s;
   _stylePickerIndex = _menuStyle;
+  _pendingMode = MODE_WATCH;
 }
 
 AppMode   MenuManager::currentMode()    { return _mode; }
 uint8_t   MenuManager::selectedIndex()  { return _selectedIndex; }
+AppMode   MenuManager::pendingMode()    { return _pendingMode; }
 
 bool MenuManager::consumeDirty() {
   bool d = _dirty;
@@ -119,6 +122,11 @@ void MenuManager::updateAnimation() {
   if (millis() - _animStartTime >= ANIM_DURATION_MS) {
     _animating = false;
     _scrollDir = 0;
+    // ponytail: if we were in a dive/zoom transition, resolve into the target screen.
+    if (_mode == MODE_TRANSITION) {
+      _mode = _pendingMode;
+      Serial.printf("MENU: transition resolved -> mode %d\n", (int)_mode);
+    }
     _dirty = true;  // one final clean redraw at the settled position
   }
 }
@@ -235,15 +243,19 @@ void MenuManager::handleEvent(ButtonEvent evt) {
     case EVENT_TOP_DOUBLE_CLICK:
       _animating = false;
       _scrollDir = 0;
+      // ponytail: dive/zoom transition — bracket contracts into the selected
+      // item, swaps to the target screen, then expands back to fullscreen.
       switch (_selectedIndex) {
-        case 0:  _mode = MODE_WATCH;     break;
-        case 1:  _mode = MODE_STOPWATCH; break;
-        case 2:  _mode = MODE_WEATHER;   break;
-        case 3:  _mode = MODE_CONFIG;    break;
-        default: _mode = MODE_WATCH;     break;
+        case 0:  _pendingMode = MODE_WATCH;     break;
+        case 1:  _pendingMode = MODE_STOPWATCH; break;
+        case 2:  _pendingMode = MODE_WEATHER;   break;
+        case 3:  _pendingMode = MODE_CONFIG;    break;
+        default: _pendingMode = MODE_WATCH;     break;
       }
-      _dirty = true;
-      Serial.printf("MENU: select %u -> mode %d\n", _selectedIndex, (int)_mode);
+      _mode = MODE_TRANSITION;
+      startScroll(0);  // scrollDir=0: reuse the animation timer without menu scroll
+      Serial.printf("MENU: select %u -> transition to mode %d\n",
+                    _selectedIndex, (int)_pendingMode);
       break;
     default: break;
   }

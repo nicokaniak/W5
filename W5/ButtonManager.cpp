@@ -7,9 +7,9 @@
 // BOTTOM button: scroll down only.
 
 static const uint32_t DEBOUNCE_MS        = 20;
-static const uint32_t LONG_PRESS_MS      = 500;   // both-held threshold to enter/exit menu
-static const uint32_t DOUBLE_CLICK_MS    = 300;   // window between clicks of a double-click
-static const uint32_t SHORT_PRESS_MAX_MS = 400;   // press shorter than this is a click candidate
+static const uint32_t SIMULTANEOUS_MS    = 200;   // both pressed within this window = "at the same time"
+static const uint32_t DOUBLE_CLICK_MS    = 450;   // window between taps of a double-tap
+static const uint32_t SHORT_PRESS_MAX_MS = 700;   // press shorter than this is a click candidate
 
 // ponytail: zero-initialized at file scope (state=0=IDLE since IDLE is the first
 // enumerator). pin is set in init() — can't use IDLE here because BtnState is private.
@@ -84,9 +84,12 @@ void ButtonManager::step(Btn &b, ButtonEvent clickEvt, ButtonEvent doubleClickEv
     case ARMED:
       if (pressed) {
         if (now - b.releaseTime < DOUBLE_CLICK_MS) {
+          // ponytail: fire on second tap (press down), not on release — feels like
+          // a real double-tap instead of "press and hold the second time".
+          emit(doubleClickEvt);
           b.state = DOWN2;
           b.pressStart = now;
-          b.longConsumed = false;
+          b.longConsumed = true;  // suppress emit on release
         } else {
           // window expired, emit click and start new press
           emit(clickEvt);
@@ -115,13 +118,15 @@ void ButtonManager::update() {
   // BOTTOM button: scroll down only (no double-click action)
   step(_bottom, EVENT_BOTTOM_CLICK,    EVENT_NONE);
 
-  // Both-long-press: both held and the LATER of the two presses is past the threshold
-  uint32_t now = millis();
+  // Both-press: fire as soon as both are held, no hold duration.
+  // Require near-simultaneous press (within SIMULTANEOUS_MS) so scrolling with
+  // one button then accidentally pressing the other doesn't trigger menu entry.
   bool topHeld    = (_top.state    == DOWN || _top.state    == DOWN2);
   bool bottomHeld = (_bottom.state == DOWN || _bottom.state == DOWN2);
   if (topHeld && bottomHeld && !_bothLongFired) {
-    uint32_t laterStart = max(_top.pressStart, _bottom.pressStart);
-    if (now - laterStart >= LONG_PRESS_MS) {
+    uint32_t earlier = min(_top.pressStart, _bottom.pressStart);
+    uint32_t later   = max(_top.pressStart, _bottom.pressStart);
+    if (later - earlier <= SIMULTANEOUS_MS) {
       emit(EVENT_BOTH_LONG_PRESS);
       _bothLongFired = true;
       _top.longConsumed    = true;  // suppress click/double-click on their release

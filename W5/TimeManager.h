@@ -9,7 +9,6 @@ public:
   static void updateTime();
   static String getCurrentTime();
   static String getCurrentDate();
-  static void drawWatchFace(const String &timeStr);
 };
 
 #endif

@@ -86,14 +86,6 @@ void BluetoothManager::initBluetooth() {
 #endif
 }
 
-void BluetoothManager::checkNotifications() {
-  // BLE data arrives via onWrite callback; nothing to poll here.
-}
-
-bool BluetoothManager::hasNewNotification() {
-  return newNotification;
-}
-
 String BluetoothManager::getNotification() {
   newNotification = false;
   return notificationMessage;
