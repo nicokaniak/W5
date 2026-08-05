@@ -3,6 +3,7 @@
 #include "RM67162Display.h"
 #include "MenuManager.h"
 #include "StopwatchManager.h"
+#include "PomodoroManager.h"
 #include "TimeManager.h"
 #include "WeatherManager.h"
 #include "config/config.h" // LATITUDE / LONGITUDE for Dusk2Dawn
@@ -1066,7 +1067,7 @@ void DisplayManager::drawConfigMenu(uint8_t selectedIndex) {
     // Icon for the Wi-Fi setup item; uses the same Wi-Fi bitmaps as the status screen.
     if (i == 0) {
       uint8_t iw = 0, ih = 0;
-      const unsigned char* bm = menuIconBitmap(4, sel ? 48 : 32, &iw, &ih);
+      const unsigned char* bm = menuIconBitmap(5, sel ? 48 : 32, &iw, &ih);
       if (bm) {
         int16_t ix = canvas->width() - iw - 10;
         int16_t iy = y + (itemH - ih) / 2;
@@ -1201,6 +1202,74 @@ void DisplayManager::drawStopwatch() {
 
   // Controls hint (bottom, tiny gray)
   const char *hint = "TOP:START/STOP  BOT:LAP/RST";
+  text7segBounds(hint, 1, &w, &h);
+  drawText7seg(canvas, hint, (canvas->width() - w) / 2, 222, 1, 0x7BEF); // gray
+
+  pushToDisplay();
+}
+
+// ponytail: MM:SS from milliseconds — no centiseconds needed for a 25-min countdown.
+// Reuses the 7-seg renderer at textSize 8 like the stopwatch.
+static String formatPomo(uint32_t ms) {
+  uint32_t s = ms / 1000;
+  uint32_t m = s / 60;
+  s = s % 60;
+  char buf[8];
+  snprintf(buf, sizeof(buf), "%02u:%02u", (unsigned)m, (unsigned)s);
+  return String(buf);
+}
+
+void DisplayManager::drawPomodoro() {
+  if (!canvas)
+    return;
+
+  canvas->fillScreen(0x0000);
+
+  // ----- Phase label (top, centered) -----
+  const char *label;
+  uint16_t labelColor;
+  PomodoroPhase phase = PomodoroManager::currentPhase();
+  if (PomodoroManager::isIdle()) {
+    label = "READY";
+    labelColor = 0x7BEF; // gray
+  } else if (phase == PHASE_WORK) {
+    label = "WORK";
+    labelColor = 0xF800; // red
+  } else if (phase == PHASE_SHORT_BREAK) {
+    label = "SHORT";
+    labelColor = 0x07E0; // green
+  } else {
+    label = "LONG";
+    labelColor = 0x07FF; // cyan
+  }
+
+  // Append PAUSED if applicable
+  String statusStr;
+  if (PomodoroManager::isPaused()) {
+    statusStr = String(label) + " PAUSED";
+  } else {
+    statusStr = String(label);
+  }
+
+  uint16_t w, h;
+  text7segBounds(statusStr.c_str(), 2, &w, &h);
+  drawText7seg(canvas, statusStr.c_str(), (canvas->width() - w) / 2, 12, 2, labelColor);
+
+  // ----- Big countdown timer (centered, textSize 8) -----
+  String timeStr = formatPomo(PomodoroManager::getRemainingMs());
+  text7segBounds(timeStr.c_str(), 8, &w, &h);
+  drawText7seg(canvas, timeStr.c_str(), (canvas->width() - w) / 2,
+          (canvas->height() - h) / 2, 8, 0xFFFF); // white
+
+  // ----- Session count (below timer) -----
+  uint8_t sessions = PomodoroManager::getCompletedWorkCount();
+  String sessStr = "SESSION " + String(sessions) + "/4";
+  text7segBounds(sessStr.c_str(), 2, &w, &h);
+  drawText7seg(canvas, sessStr.c_str(), (canvas->width() - w) / 2, 170, 2,
+          0xFFE0); // yellow
+
+  // Controls hint (bottom, tiny gray)
+  const char *hint = "TOP:START/PAUSE  BOT:SKIP";
   text7segBounds(hint, 1, &w, &h);
   drawText7seg(canvas, hint, (canvas->width() - w) / 2, 222, 1, 0x7BEF); // gray
 

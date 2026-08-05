@@ -10,6 +10,7 @@ public:
   static void drawWatchFace(const String &timeStr);
   static void drawMenu(uint8_t selectedIndex, int8_t scrollDir = 0, float animProgress = 1.0f);
   static void drawStopwatch();
+  static void drawPomodoro();
   static void drawWeatherScreen();
   static void drawWifiConnecting();
   static void drawConfigMenu(uint8_t selectedIndex);

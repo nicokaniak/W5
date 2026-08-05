@@ -1,5 +1,6 @@
 #include "MenuManager.h"
 #include "StopwatchManager.h"
+#include "PomodoroManager.h"
 #include "DisplayManager.h"
 #include "TimeManager.h"
 #include "WeatherManager.h"
@@ -14,8 +15,8 @@ static WiFiManager wifiManager;
 
 // ponytail: items live here as the single source of truth. DisplayManager queries
 // menuItemLabel(), the select handler maps index -> mode below. Keep both in sync.
-static const char* MENU_ITEMS[] = { "Watch", "Stopwatch", "Weather", "Config" };
-static const uint8_t NUM_ITEMS = 4;
+static const char* MENU_ITEMS[] = { "Watch", "Stopwatch", "Pomodoro", "Weather", "Config" };
+static const uint8_t NUM_ITEMS = 5;
 
 // ponytail: config sub-menu. Adding items only requires extending this array;
 // the handler dispatches by index below. Index 0 = Wi-Fi portal, 1 = style picker,
@@ -219,7 +220,7 @@ void MenuManager::handleEvent(ButtonEvent evt) {
       _mode = MODE_MENU;
       _selectedIndex = NUM_ITEMS - 1;
     } else {
-      // From WATCH, STOPWATCH, WEATHER, CONFIG, TRANSITION -> go to menu
+      // From WATCH, STOPWATCH, POMODORO, WEATHER, CONFIG, TRANSITION -> go to menu
       _mode = MODE_MENU;
       _selectedIndex = 0;
     }
@@ -232,6 +233,13 @@ void MenuManager::handleEvent(ButtonEvent evt) {
   // BOTH_PRESS and BOTTOM_LONG_PRESS already exited to menu above.
   if (_mode == MODE_STOPWATCH) {
     StopwatchManager::handleEvent(evt);
+    return;
+  }
+
+  // Pomodoro handles its own button events (start/pause/skip/reset);
+  // BOTH_PRESS and BOTTOM_LONG_PRESS already exited to menu above.
+  if (_mode == MODE_POMODORO) {
+    PomodoroManager::handleEvent(evt);
     return;
   }
 
@@ -349,8 +357,9 @@ void MenuManager::handleEvent(ButtonEvent evt) {
       switch (_selectedIndex) {
         case 0:  _pendingMode = MODE_WATCH;     break;
         case 1:  _pendingMode = MODE_STOPWATCH; break;
-        case 2:  _pendingMode = MODE_WEATHER;   break;
-        case 3:  _pendingMode = MODE_CONFIG;    break;
+        case 2:  _pendingMode = MODE_POMODORO;  break;
+        case 3:  _pendingMode = MODE_WEATHER;   break;
+        case 4:  _pendingMode = MODE_CONFIG;    break;
         default: _pendingMode = MODE_WATCH;     break;
       }
       _mode = MODE_TRANSITION;

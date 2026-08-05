@@ -8,6 +8,7 @@ enum AppMode {
   MODE_WATCH,
   MODE_MENU,
   MODE_STOPWATCH,
+  MODE_POMODORO,
   MODE_WEATHER,
   MODE_CONFIG,
   MODE_MENU_STYLE,   // sub-screen of CONFIG: pick the rotary menu visual style

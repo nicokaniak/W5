@@ -7,6 +7,7 @@
 #include "DisplayManager.h"
 #include "MenuManager.h"
 #include "StopwatchManager.h"
+#include "PomodoroManager.h"
 #include "TimeManager.h"
 #include "WeatherManager.h"
 
@@ -20,6 +21,10 @@ static const uint32_t WEATHER_FETCH_MS = 600000;
 // stopwatch without saturating SPI. Ceiling: cs digit jumps ~5/frame; value is
 // always exact since elapsed is computed from millis() at draw time.
 static const uint32_t STOPWATCH_REDRAW_MS = 50;
+// ponytail: Pomodoro countdown only needs 1Hz — seconds tick, no centiseconds.
+// Ceiling: the display reads as a live countdown; sub-second updates would just
+// burn SPI bandwidth for no perceptible change.
+static const uint32_t POMODORO_REDRAW_MS = 1000;
 // ponytail: ambient menu animation (radar sweep, dot pulse, scanlines, flicker)
 // runs at 20fps even when idle. Full framebuffer push (~27ms @ 75MHz SPI) caps
 // us near 30fps; 50ms is safe and reads as smooth. Ceiling: if styles grow
@@ -29,6 +34,7 @@ static const uint32_t MENU_REDRAW_MS = 50;
 static uint32_t lastWatchRedraw = 0;
 static uint32_t lastWeatherFetch = 0;
 static uint32_t lastStopwatchRedraw = 0;
+static uint32_t lastPomodoroRedraw = 0;
 static uint32_t lastMenuRedraw = 0;
 
 void setup() {
@@ -77,6 +83,7 @@ void setup() {
   ButtonManager::init();
   MenuManager::init();
   StopwatchManager::init();
+  PomodoroManager::init();
   Serial.println("Ready");
 }
 
@@ -158,6 +165,19 @@ void loop() {
                     now - lastStopwatchRedraw >= STOPWATCH_REDRAW_MS)) {
         DisplayManager::drawStopwatch();
         lastStopwatchRedraw = now;
+      }
+      break;
+    }
+    case MODE_POMODORO: {
+      // Auto-advance when the current phase timer expires.
+      PomodoroManager::update();
+      // Redraw on mode entry / state change, or at 1Hz while running so the
+      // countdown ticks. Idle/paused screens are static.
+      bool force = MenuManager::consumeDirty() || PomodoroManager::consumeDirty();
+      if (force || (PomodoroManager::isRunning() &&
+                    now - lastPomodoroRedraw >= POMODORO_REDRAW_MS)) {
+        DisplayManager::drawPomodoro();
+        lastPomodoroRedraw = now;
       }
       break;
     }

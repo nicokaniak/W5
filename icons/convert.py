@@ -16,6 +16,7 @@ WEATHER_OUT = os.path.join(REPO, "W5", "weather_icons.h")
 ICON_SPECS = [
     ("watch.png",  "WATCH"),
     ("timer.png",  "TIMER"),   # Stopwatch
+    ("timer-reset.png", "POMODORO"),  # Pomodoro timer
     ("weather/cloud-sun.png", "CLOUD_SUN"),  # Weather
     ("cog.png",    "COG"),     # Configuration
     ("wifi.png",   "WIFI"),    # WiFi status (not a menu item, but shares the pipeline)
@@ -103,6 +104,9 @@ def main():
     # Emit one array per (icon, size): NAME_24, NAME_16
     for fname, sym in ICON_SPECS:
         path = os.path.join(ICONS_DIR, fname)
+        if not os.path.exists(path):
+            print(f"  SKIP missing: {fname}")
+            continue
         im = Image.open(path).convert("RGBA")
         # Use alpha as the mask (glyphs are single-color black on transparent).
         # Split alpha into its own 'L' image as the 1-bit source.
@@ -115,9 +119,9 @@ def main():
     # Lookup helper: returns the PROGMEM array + dims for a menu label index,
     # or nullptr when there is no icon for that index. Sizes are data-driven
     # from SIZES so the lookup can't drift from the emitted arrays.
-    labels = ["Watch", "Stopwatch (timer glyph)", "Weather (cloud-sun)", "Configuration (cog glyph)", "WiFi (status indicator)"]
+    labels = ["Watch", "Stopwatch (timer glyph)", "Pomodoro", "Weather (cloud-sun)", "Configuration (cog glyph)", "WiFi (status indicator)"]
     chunks += [
-        "// labelIdx: 0=Watch, 1=Stopwatch(timer), 2=Weather(cloud-sun), 3=Configuration(cog), 4=WiFi(status)",
+        "// labelIdx: 0=Watch, 1=Stopwatch(timer), 2=Pomodoro, 3=Weather(cloud-sun), 4=Configuration(cog), 5=WiFi(status)",
         "inline const unsigned char* menuIconBitmap(uint8_t labelIdx, uint8_t size,",
         "                                        uint8_t* outW, uint8_t* outH) {",
         "  switch (labelIdx) {",

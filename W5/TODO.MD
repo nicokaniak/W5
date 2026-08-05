@@ -1,0 +1,6 @@
+- [x] Add Pomodoro
+- [ ] Add screen off
+- [ ] change order of direction of buttons ofr certain menues
+- [ ] improve asthetics of other sections to match asthetic of watch
+- [ ] press time from watch to menu too long, halve it
+- [] animation transition from menu to secondary screen:  blink name of selected item, reduce semi circle while blinking and slide ing to the left giving place to the new screen
