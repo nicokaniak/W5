@@ -33,6 +33,10 @@ static_assert(sizeof(MENU_STYLE_LABELS)/sizeof(MENU_STYLE_LABELS[0]) == MENU_STY
 static_assert(NUM_CONFIG_ITEMS > 0, "config menu must have at least one item");
 
 static const uint32_t ANIM_DURATION_MS = 350;  // scroll animation length
+// ponytail: transition is longer than scroll — 3 blinks + shrink + slide-in
+// need more time than a simple carousel scroll. Ceiling: if blinks feel slow,
+// drop to 500; if slide feels rushed, raise to 700.
+static const uint32_t TRANSITION_DURATION_MS = 600;
 
 // ponytail: level 0..15 -> DBV 0..255 (level * 17). 17*15 = 255 exactly.
 // File-local so DisplayManager's picker can re-derive the same fill count from
@@ -141,7 +145,8 @@ int8_t MenuManager::scrollDir() { return _scrollDir; }
 
 float MenuManager::animProgress() {
   if (!_animating) return 1.0f;
-  float t = (float)(millis() - _animStartTime) / (float)ANIM_DURATION_MS;
+  uint32_t dur = (_mode == MODE_TRANSITION) ? TRANSITION_DURATION_MS : ANIM_DURATION_MS;
+  float t = (float)(millis() - _animStartTime) / (float)dur;
   if (t >= 1.0f) t = 1.0f;
   // ponytail: smoothstep (t*t*(3-2*t)) — zero velocity at both endpoints.
   // Items start gently, accelerate through the middle, decelerate to a stop.
@@ -151,7 +156,8 @@ float MenuManager::animProgress() {
 
 void MenuManager::updateAnimation() {
   if (!_animating) return;
-  if (millis() - _animStartTime >= ANIM_DURATION_MS) {
+  uint32_t dur = (_mode == MODE_TRANSITION) ? TRANSITION_DURATION_MS : ANIM_DURATION_MS;
+  if (millis() - _animStartTime >= dur) {
     _animating = false;
     _scrollDir = 0;
     // ponytail: if we were in a dive/zoom transition, resolve into the target screen.

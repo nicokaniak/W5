@@ -23,6 +23,13 @@
 static RM67162Display display;
 GFXcanvas16 *DisplayManager::canvas = nullptr;
 
+// ponytail: transition slide-in needs a snapshot of the target screen to blit
+// at horizontal offsets. Allocated once in PSRAM (~257KB). suppressPush prevents
+// the target renderers (which call pushToDisplay internally) from flashing the
+// display during the offscreen capture.
+static uint16_t *transitionTargetBuf = nullptr;
+static bool transitionSuppressPush = false;
+
 // ----- Starfield watch face helpers -----
 // Adapted from watchy-starfield-main: 7-seg digit bitmaps, moon phase,
 // sunrise/sunset, procedural starfield background. Layout is landscape
@@ -368,7 +375,7 @@ void DisplayManager::initDisplay() {
 }
 
 void DisplayManager::pushToDisplay() {
-  if (canvas) {
+  if (canvas && !transitionSuppressPush) {
     lcd_PushColors(0, 0, canvas->width(), canvas->height(),
                    canvas->getBuffer());
   }
@@ -1631,62 +1638,93 @@ void DisplayManager::drawMenu(uint8_t selectedIndex, int8_t scrollDir, float t) 
   pushToDisplay();
 }
 
-// ponytail: dive/zoom transition. A bracket contracts from fullscreen into a
-// small rect at the selected menu item's arc position (phase 1), then expands
-// back to fullscreen (phase 2). The content inside is just the item label —
-// not a full screen redraw. The full menu/watch/weather renderers take 15-30ms
-// each, which plus the 27ms SPI push gave only 6-8 frames over the 350ms
-// animation (smoothstep has zero velocity at endpoints → bracket appeared
-// frozen for 100ms+ at start/end). Drawing just a label drops content draw to
-// ~1ms, giving ~12 frames. The real screen draws when the transition resolves.
+// ponytail: blink-shrink-slide transition. Phase 1: the semi-circle arc and
+// the selected item's label blink 3x while shrinking and sliding left off the
+// screen edge. Phase 2: the target screen is rendered once into a PSRAM buffer
+// (suppressing the display push), then blitted row-by-row at a decreasing
+// horizontal offset so it slides in from right to left over black. The target
+// renderers take 15-30ms but are called only ONCE (at phase 2 entry); each
+// slide frame is just a fillScreen + memcpy (~5ms), giving smooth motion.
 void DisplayManager::drawTransition(uint8_t selectedIndex, float progress) {
   if (!canvas) return;
   GFXcanvas16 *c = canvas;
-
-  // Selected item center on the menu arc (angle = 0).
-  const int16_t sx = MENU_CX + MENU_R;  // 115
-  const int16_t sy = MENU_CY;           // 120
-  const int16_t tw = 24, th = 24;
-  const int16_t tx = sx - tw / 2, ty = sy - th / 2;
   const int16_t fw = c->width(), fh = c->height();
+
+  static bool targetCaptured = false;
 
   const bool phase1 = (progress < 0.5f);
   const float p = phase1 ? (progress * 2.0f) : ((progress - 0.5f) * 2.0f);
 
-  auto lerpI = [](int16_t a, int16_t b, float t) {
-    return (int16_t)(a + (b - a) * t + 0.5f);
-  };
+  auto lerpF = [](float a, float b, float t) { return a + (b - a) * t; };
 
-  int16_t rx, ry, rw, rh;
   if (phase1) {
-    rx = lerpI(0, tx, p);  ry = lerpI(0, ty, p);
-    rw = lerpI(fw, tw, p); rh = lerpI(fh, th, p);
+    targetCaptured = false;
+    c->fillScreen(0x0000);
+
+    // Blink: 3 on-off cycles over phase 1 → (int)(p*6)%2==0 means visible.
+    bool visible = ((int)(p * 6.0f) % 2) == 0;
+
+    // Arc: radius shrinks MENU_R→0, center slides MENU_CX→-MENU_R (off left).
+    float r  = lerpF((float)MENU_R, 0.0f, p);
+    float cx = lerpF((float)MENU_CX, -(float)MENU_R, p);
+    int16_t cy = MENU_CY;
+
+    if (visible && r > 1.0f) {
+      uint16_t arcCol = 0x07FF;  // cyan
+      c->drawCircle((int16_t)cx, cy, (int16_t)r,     arcCol);
+      c->drawCircle((int16_t)cx, cy, (int16_t)r - 1, arcCol);
+    }
+
+    // Label: blinks, shrinks (text size 6→1), slides left with the arc.
+    // Sits at arc angle 0 → (cx + r, cy), same point the selected dot was.
+    if (visible) {
+      const char* label = MenuManager::menuItemLabel(selectedIndex);
+      float labelX = cx + r;
+      uint8_t textSize = (uint8_t)lerpF(6.0f, 1.0f, p);
+      if (textSize < 1) textSize = 1;
+      uint16_t lw, lh;
+      text7segBounds(label, textSize, &lw, &lh);
+      int16_t tx = (int16_t)labelX;
+      int16_t ty = cy - (int16_t)lh / 2;
+      drawText7seg(c, label, tx, ty, textSize, 0x07FF);
+    }
+
+    pushToDisplay();
   } else {
-    rx = lerpI(tx, 0, p);  ry = lerpI(ty, 0, p);
-    rw = lerpI(tw, fw, p); rh = lerpI(th, fh, p);
+    // Phase 2: slide the target screen in from right to left.
+    if (!targetCaptured) {
+      if (!transitionTargetBuf)
+        transitionTargetBuf = (uint16_t*)ps_malloc((size_t)fw * fh * 2);
+      if (transitionTargetBuf) {
+        transitionSuppressPush = true;
+        switch (MenuManager::pendingMode()) {
+          case MODE_WATCH:
+            TimeManager::updateTime();
+            drawWatchFace(TimeManager::getCurrentTime());
+            break;
+          case MODE_STOPWATCH: drawStopwatch(); break;
+          case MODE_POMODORO:  drawPomodoro();  break;
+          case MODE_WEATHER:   drawWeatherScreen(); break;
+          case MODE_CONFIG:    drawConfigMenu(MenuManager::configSelectedIndex()); break;
+          default:             c->fillScreen(0x0000); break;
+        }
+        transitionSuppressPush = false;
+        memcpy(transitionTargetBuf, c->getBuffer(), (size_t)fw * fh * 2);
+      }
+      targetCaptured = true;
+    }
+
+    // offset: fw (fully off right) → 0 (in place). Visible width = fw - offset.
+    int16_t offset = (int16_t)(fw * (1.0f - p));
+    c->fillScreen(0x0000);
+    if (transitionTargetBuf && offset < fw) {
+      uint16_t *dst = c->getBuffer();
+      int16_t copyW = fw - offset;
+      for (int16_t y = 0; y < fh; y++)
+        memcpy(dst + y * fw + offset, transitionTargetBuf + y * fw, (size_t)copyW * 2);
+    }
+    pushToDisplay();
   }
-
-  // Content: just the selected item label, centered. Color shifts cyan→yellow
-  // at the midpoint to signal the content swap without an expensive redraw.
-  c->fillScreen(0x0000);
-  const char* label = MenuManager::menuItemLabel(selectedIndex);
-  uint16_t labelCol = phase1 ? 0x07FF : 0xFFE0;  // cyan → yellow
-  uint16_t lw, lh;
-  text7segBounds(label, 4, &lw, &lh);
-  drawText7seg(c, label, (fw - lw) / 2, (fh - lh) / 2, 4, labelCol);
-
-  // Mask outside the bracket rect with black (4 strips).
-  c->fillRect(0, 0, fw, ry, 0x0000);                  // top
-  c->fillRect(0, ry + rh, fw, fh - (ry + rh), 0x0000); // bottom
-  c->fillRect(0, ry, rx, rh, 0x0000);                 // left
-  c->fillRect(rx + rw, ry, fw - (rx + rw), rh, 0x0000); // right
-
-  // Bracket outline: solid cyan in phase 1, fading out in phase 2.
-  uint16_t bracketCol = phase1 ? 0x07FF : lerp565(0x07FF, 0x0000, p);
-  if (bracketCol != 0x0000)
-    drawCornerBrackets(c, rx, ry, rw, rh, 6, bracketCol);
-
-  pushToDisplay();
 }
 
 // Menu style picker sub-screen. Lists the 4 styles; the live cursor is
