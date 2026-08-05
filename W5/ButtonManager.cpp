@@ -8,7 +8,7 @@
 // BOTH:   pressed together = enter/exit menu
 
 static const uint32_t DEBOUNCE_MS     = 20;
-static const uint32_t LONG_PRESS_MS   = 600;   // hold threshold for long press
+static const uint32_t LONG_PRESS_MS   = 300;   // hold threshold for long press
 static const uint32_t SIMULTANEOUS_MS = 500;   // both pressed within this window = "together"
 
 ButtonManager::Btn ButtonManager::_top;

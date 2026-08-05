@@ -31,6 +31,7 @@ public:
   static bool     isRunning();
   static bool     isPaused();
   static bool     isIdle();
+  static bool     isAlerting();    // phase just ended — screen blinks until acknowledged
   static uint32_t getRemainingMs();    // countdown remaining in current phase
   static uint32_t getPhaseDurationMs(); // total duration of current phase
   static uint8_t  getCompletedWorkCount(); // completed work sessions in current cycle
@@ -44,6 +45,8 @@ private:
   static uint32_t _pausedRemaining;  // ms remaining when paused
   static uint8_t  _workCount;        // completed work sessions (resets at long break)
   static bool     _dirty;
+  static bool     _alerting;       // true when phase ended — blink until acknowledged
+  static uint32_t _alertStart;     // millis() when alert began
 
   static void startPhase(PomodoroPhase phase);
   static void advancePhase();        // move to next phase in the cycle

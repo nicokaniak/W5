@@ -1223,6 +1223,14 @@ void DisplayManager::drawPomodoro() {
   if (!canvas)
     return;
 
+  // ponytail: blink the screen at 2Hz while alerting (phase just ended).
+  // 500ms on / 500ms off — toggled by (millis() / 500) % 2.
+  if (PomodoroManager::isAlerting() && (millis() / 500) % 2) {
+    canvas->fillScreen(0x0000);
+    pushToDisplay();
+    return;
+  }
+
   canvas->fillScreen(0x0000);
 
   // ----- Phase label (top, centered) -----

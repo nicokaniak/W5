@@ -7,6 +7,9 @@ static const uint32_t WORK_MS       = 25UL * 60UL * 1000UL;  // 25 min
 static const uint32_t SHORT_BREAK_MS = 5UL * 60UL * 1000UL;   // 5 min
 static const uint32_t LONG_BREAK_MS  = 15UL * 60UL * 1000UL;  // 15 min
 static const uint8_t  WORK_BEFORE_LONG = 4; // long break after 4 work sessions
+// ponytail: blink for 10s when a phase ends. If the user doesn't press anything,
+// auto-advance so the next phase starts without intervention.
+static const uint32_t ALERT_DURATION_MS = 10000;
 
 PomodoroManager::State    PomodoroManager::_state          = IDLE;
 PomodoroPhase PomodoroManager::_phase          = PHASE_IDLE;
@@ -14,6 +17,8 @@ uint32_t      PomodoroManager::_phaseEnd       = 0;
 uint32_t      PomodoroManager::_pausedRemaining = 0;
 uint8_t       PomodoroManager::_workCount      = 0;
 bool          PomodoroManager::_dirty          = false;
+bool          PomodoroManager::_alerting       = false;
+uint32_t      PomodoroManager::_alertStart     = 0;
 
 void PomodoroManager::init() {
   _state = IDLE;
@@ -21,6 +26,8 @@ void PomodoroManager::init() {
   _phaseEnd = 0;
   _pausedRemaining = 0;
   _workCount = 0;
+  _alerting = false;
+  _alertStart = 0;
   _dirty = true;
 }
 
@@ -28,6 +35,7 @@ PomodoroPhase PomodoroManager::currentPhase() { return _phase; }
 bool PomodoroManager::isRunning() { return _state == RUNNING; }
 bool PomodoroManager::isPaused()  { return _state == PAUSED; }
 bool PomodoroManager::isIdle()    { return _state == IDLE; }
+bool PomodoroManager::isAlerting() { return _alerting; }
 
 uint32_t PomodoroManager::phaseDurationMs(PomodoroPhase phase) {
   switch (phase) {
@@ -60,10 +68,22 @@ bool PomodoroManager::consumeDirty() {
 }
 
 void PomodoroManager::update() {
+  if (_alerting) {
+    if (millis() - _alertStart >= ALERT_DURATION_MS) {
+      _alerting = false;
+      advancePhase();
+    }
+    return;
+  }
   if (_state != RUNNING) return;
   if (millis() >= _phaseEnd) {
-    Serial.println("POMO: phase ended naturally");
-    advancePhase();
+    // ponytail: enter alerting state instead of immediately advancing — the
+    // screen blinks to notify the user. Button press or timeout clears it.
+    _alerting = true;
+    _alertStart = millis();
+    _state = IDLE;  // stop the countdown; phase info retained for display
+    _dirty = true;
+    Serial.println("POMO: phase ended — alerting");
   }
 }
 
@@ -96,6 +116,13 @@ void PomodoroManager::advancePhase() {
 }
 
 void PomodoroManager::handleEvent(ButtonEvent evt) {
+  // Any button press while alerting acknowledges it and advances.
+  if (_alerting) {
+    _alerting = false;
+    advancePhase();
+    Serial.println("POMO: alert acknowledged");
+    return;
+  }
   switch (evt) {
     case EVENT_TOP_CLICK:
       if (_state == IDLE) {
@@ -129,6 +156,7 @@ void PomodoroManager::handleEvent(ButtonEvent evt) {
       _phaseEnd = 0;
       _pausedRemaining = 0;
       _workCount = 0;
+      _alerting = false;
       _dirty = true;
       Serial.println("POMO: reset");
       break;

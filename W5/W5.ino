@@ -171,11 +171,15 @@ void loop() {
     case MODE_POMODORO: {
       // Auto-advance when the current phase timer expires.
       PomodoroManager::update();
-      // Redraw on mode entry / state change, or at 1Hz while running so the
-      // countdown ticks. Idle/paused screens are static.
+      // Redraw on mode entry / state change, at 1Hz while running, or at 4Hz
+      // while alerting (blink effect). Idle/paused screens are static.
       bool force = MenuManager::consumeDirty() || PomodoroManager::consumeDirty();
-      if (force || (PomodoroManager::isRunning() &&
-                    now - lastPomodoroRedraw >= POMODORO_REDRAW_MS)) {
+      bool periodic = PomodoroManager::isRunning()
+                      ? (now - lastPomodoroRedraw >= POMODORO_REDRAW_MS)
+                      : PomodoroManager::isAlerting()
+                        ? (now - lastPomodoroRedraw >= 250)
+                        : false;
+      if (force || periodic) {
         DisplayManager::drawPomodoro();
         lastPomodoroRedraw = now;
       }
