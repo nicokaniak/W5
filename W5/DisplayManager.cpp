@@ -1364,10 +1364,14 @@ static void drawMenuLabel(GFXcanvas16 *c, int16_t ax, int16_t ay,
   bool isSelected = (closeness >= 0.6f);
   bool isFar      = (closeness < 0.25f);
   uint8_t  textSize = isSelected ? 6 : (isFar ? 2 : 4);
-  uint16_t textCol  = lerp565(0x4208, 0xFFFF, closeness);
+  // ponytail: lightened dark endpoint (0x7BEF ~ light gray) so unselected items
+  // stay readable instead of dropping to near-black at the arc edges.
+  uint16_t textCol  = lerp565(0x7BEF, 0xFFFF, closeness);
   uint16_t w, h;
   text7segBounds(label.c_str(), textSize, &w, &h);
-  int16_t tx = ax;
+  // ponytail: nudge the label right of the arc point so the text isn't kissing
+  // the circumference.
+  int16_t tx = ax + 6;
   int16_t ty = ay - (int16_t)h / 2;
   if (isFar) {
     uint16_t blurCol = lerp565(0x2104, 0x4208, closeness * 4.0f);
@@ -1379,15 +1383,22 @@ static void drawMenuLabel(GFXcanvas16 *c, int16_t ax, int16_t ay,
     uint8_t iconSize = isSelected ? 48 : 32;
     uint8_t iw = 0, ih = 0;
     const unsigned char *bm = menuIconBitmap(labelIdx, iconSize, &iw, &ih);
+    int16_t iconX = tx + (int16_t)w + 4;
     if (bm) {
-      int16_t iconX = tx + (int16_t)w + 4;
       int16_t iconY = ay - (int16_t)ih / 2;
       c->drawBitmap(iconX, iconY, bm, iw, ih, textCol);
     }
     // ponytail: cyan underline beneath the selected item's label — the visual
-    // anchor that blinks and retreats left during the transition.
-    if (isSelected)
-      c->drawFastHLine(tx, ty + (int16_t)h + 2, (int16_t)w, 0x07FF);
+    // anchor that blinks and retreats left during the transition. Now extends
+    // fully to the icon's right edge, then a 45° downward-rightward tail.
+    if (isSelected) {
+      int16_t uy = ty + (int16_t)h + 2;
+      int16_t uxEnd = bm ? (iconX + (int16_t)iw) : (tx + (int16_t)w);
+      c->drawFastHLine(tx, uy, uxEnd - tx, 0x07FF);
+      // 45° downward-rightward angled extension off the underline's right end.
+      const int16_t tailLen = 7;
+      c->drawLine(uxEnd, uy, uxEnd + tailLen, uy + tailLen, 0x07FF);
+    }
   }
 }
 
