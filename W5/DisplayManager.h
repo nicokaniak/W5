@@ -18,11 +18,13 @@ public:
   static void drawBrightnessPicker(uint8_t pickerIndex);
   static void drawWifiPortalScreen();
   static void drawWifiResultScreen(bool connected, const String &message);
-  // ponytail: sci-fi blink-shrink-slide transition. Phase 1 (power-down): arc
-  // shifts cyan→amber as it shrinks/slides left; label blinks 3x with chromatic
-  // aberration (red+cyan ghosts). Phase 2 (signal acquire): target screen slides
-  // in right→left via scanline reveal, then lock-on flash (white brackets) fades.
-  // Reuses smoothstep progress from MenuManager (TRANSITION_DURATION_MS).
+  // ponytail: sci-fi blink-shrink-slide transition (forward + reverse).
+  // FORWARD (menu→screen): arc shrinks cyan→amber + label blinks/glitches +
+  // underline retreats; then target screen slides in right→left via scanline
+  // reveal + lock-on flash.
+  // REVERSE (screen→menu): lock-off flash + current screen slides out right via
+  // scanline de-materialize; then arc grows amber→cyan + label blinks/grows +
+  // underline grows. Reuses smoothstep progress (TRANSITION_DURATION_MS).
   static void drawTransition(uint8_t selectedIndex, float progress);
 
 private:

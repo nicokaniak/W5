@@ -58,6 +58,8 @@ MenuStyle MenuManager::_stylePickerIndex = STYLE_HUD;
 uint8_t   MenuManager::_brightness       = BRIGHTNESS_LEVELS - 1; // default max
 uint8_t   MenuManager::_brightnessPicker = BRIGHTNESS_LEVELS - 1;
 AppMode   MenuManager::_pendingMode      = MODE_WATCH;
+bool      MenuManager::_transitionReverse = false;
+AppMode   MenuManager::_transitionFromMode = MODE_WATCH;
 
 void MenuManager::init() {
   _mode = MODE_WATCH;
@@ -85,6 +87,8 @@ void MenuManager::init() {
 AppMode   MenuManager::currentMode()    { return _mode; }
 uint8_t   MenuManager::selectedIndex()  { return _selectedIndex; }
 AppMode   MenuManager::pendingMode()    { return _pendingMode; }
+bool      MenuManager::transitionReverse()  { return _transitionReverse; }
+AppMode   MenuManager::transitionFromMode() { return _transitionFromMode; }
 
 bool MenuManager::consumeDirty() {
   bool d = _dirty;
@@ -163,6 +167,7 @@ void MenuManager::updateAnimation() {
     // ponytail: if we were in a dive/zoom transition, resolve into the target screen.
     if (_mode == MODE_TRANSITION) {
       _mode = _pendingMode;
+      _transitionReverse = false;  // reset for next transition
       Serial.printf("MENU: transition resolved -> mode %d\n", (int)_mode);
     }
     _dirty = true;  // one final clean redraw at the settled position
@@ -211,13 +216,26 @@ void MenuManager::handleEvent(ButtonEvent evt) {
       _mode = MODE_CONFIG;
       _configIndex = 2; // land back on "Brightness"
     } else if (_mode == MODE_CONFIG) {
-      // Exit config sub-menu back to the main Config item.
-      _mode = MODE_MENU;
+      // Exit config sub-menu back to the main Config item via reverse transition.
+      _transitionFromMode = MODE_CONFIG;
+      _transitionReverse = true;
       _selectedIndex = NUM_ITEMS - 1;
-    } else {
-      // Exit any screen back to its own menu entry (not always index 0).
-      _selectedIndex = modeToMenuIndex(_mode);
+      _pendingMode = MODE_MENU;
+      _mode = MODE_TRANSITION;
+      startScroll(0);
+    } else if (_mode == MODE_TRANSITION) {
+      // Interrupting an ongoing transition — resolve instantly to menu.
+      _transitionReverse = false;
+      _selectedIndex = modeToMenuIndex(pendingMode());
       _mode = MODE_MENU;
+    } else {
+      // Exit any screen back to its own menu entry via reverse transition.
+      _transitionFromMode = _mode;
+      _transitionReverse = true;
+      _selectedIndex = modeToMenuIndex(_mode);
+      _pendingMode = MODE_MENU;
+      _mode = MODE_TRANSITION;
+      startScroll(0);
     }
     _dirty = true;
     Serial.printf("MENU: mode -> %d\n", (int)_mode);
@@ -241,11 +259,20 @@ void MenuManager::handleEvent(ButtonEvent evt) {
       lcd_brightness(brightnessValue(_brightness));  // restore panel
       _mode = MODE_MENU;
       _selectedIndex = NUM_ITEMS - 1;
-    } else {
-      // From WATCH, STOPWATCH, POMODORO, WEATHER, TRANSITION -> go to menu,
-      // landing on the entry the screen was opened from.
-      _selectedIndex = modeToMenuIndex(_mode);
+    } else if (_mode == MODE_TRANSITION) {
+      // Interrupting an ongoing transition — resolve instantly to menu.
+      _transitionReverse = false;
+      _selectedIndex = modeToMenuIndex(pendingMode());
       _mode = MODE_MENU;
+    } else {
+      // From WATCH, STOPWATCH, POMODORO, WEATHER, CONFIG -> reverse transition
+      // back to menu, landing on the entry the screen was opened from.
+      _transitionFromMode = _mode;
+      _transitionReverse = true;
+      _selectedIndex = modeToMenuIndex(_mode);
+      _pendingMode = MODE_MENU;
+      _mode = MODE_TRANSITION;
+      startScroll(0);
     }
     _dirty = true;
     Serial.printf("MENU: back -> mode %d\n", (int)_mode);

@@ -69,6 +69,9 @@ public:
 
   // Dive/zoom transition (menu -> selected screen)
   static AppMode pendingMode();     // target screen the transition resolves into
+  // Reverse transition (screen -> menu): slide current screen out, materialize menu
+  static bool   transitionReverse();   // true during a screen→menu transition
+  static AppMode transitionFromMode(); // screen we're leaving in a reverse transition
 
 private:
   static AppMode   _mode;
@@ -84,6 +87,8 @@ private:
   static uint8_t   _brightness;         // persisted level (0..15), loaded at init
   static uint8_t   _brightnessPicker;   // live cursor in MODE_BRIGHTNESS
   static AppMode   _pendingMode;        // target screen during MODE_TRANSITION
+  static bool      _transitionReverse;  // true = screen→menu, false = menu→screen
+  static AppMode   _transitionFromMode; // screen being left in reverse transition
   static void      startScroll(int8_t dir);
   static void      runWifiPortal();
 };

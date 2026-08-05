@@ -1642,15 +1642,21 @@ void DisplayManager::drawMenu(uint8_t selectedIndex, int8_t scrollDir, float t) 
   pushToDisplay();
 }
 
-// ponytail: sci-fi blink-shrink-slide transition.
-// Phase 1 (power-down): the semi-circle arc shifts cyan→amber as it shrinks
-// and slides left off-screen; the selected label blinks 3x with chromatic
-// aberration (red+cyan ghost copies) — reads as a hologram destabilizing.
-// Phase 2 (signal acquire): the target screen is rendered once into a PSRAM
-// buffer, then slides in right→left while materializing via a scanline reveal
-// (every Nth row initially, gaps fill as it settles). A lock-on flash (white
-// corner brackets) snaps on near the end and fades as the screen locks in.
-// Target renderers (15-30ms) run only ONCE at phase 2 entry; each frame after
+// ponytail: sci-fi blink-shrink-slide transition (forward + reverse).
+//
+// FORWARD (menu → screen):
+//   Phase 1 (power-down): arc shifts cyan→amber as it shrinks/slides left;
+//   label blinks 3x with chromatic aberration; underline retreats to 0.
+//   Phase 2 (signal acquire): target screen slides in right→left via scanline
+//   reveal; lock-on flash (white brackets) snaps on and fades.
+//
+// REVERSE (screen → menu):
+//   Phase 1 (disconnect): lock-off flash at start; current screen slides out
+//   right→off-screen via scanline de-materialize (rows vanish 1→4 gap).
+//   Phase 2 (power-up): arc grows 0→MENU_R sliding right, color amber→cyan;
+//   label blinks 3x growing (text 1→6); underline grows 0→full width.
+//
+// Target renderers (15-30ms) run only ONCE at capture time; each frame after
 // is fillScreen + memcpy (~5ms), keeping the slide smooth.
 void DisplayManager::drawTransition(uint8_t selectedIndex, float progress) {
   if (!canvas) return;
@@ -1659,11 +1665,110 @@ void DisplayManager::drawTransition(uint8_t selectedIndex, float progress) {
 
   static bool targetCaptured = false;
 
+  // Reset capture flag at the very start of each transition so an interrupted
+  // prior transition (which may have left it true) doesn't skip the next capture.
+  if (progress < 0.02f) targetCaptured = false;
+
   const bool phase1 = (progress < 0.5f);
   const float p = phase1 ? (progress * 2.0f) : ((progress - 0.5f) * 2.0f);
 
   auto lerpF = [](float a, float b, float t) { return a + (b - a) * t; };
 
+  // ===== REVERSE: screen → menu =====
+  if (MenuManager::transitionReverse()) {
+    if (phase1) {
+      // Phase 1: capture current screen, slide it out to the right + de-materialize.
+      if (!targetCaptured) {
+        if (!transitionTargetBuf)
+          transitionTargetBuf = (uint16_t*)ps_malloc((size_t)fw * fh * 2);
+        if (transitionTargetBuf) {
+          transitionSuppressPush = true;
+          switch (MenuManager::transitionFromMode()) {
+            case MODE_WATCH:
+              TimeManager::updateTime();
+              drawWatchFace(TimeManager::getCurrentTime());
+              break;
+            case MODE_STOPWATCH: drawStopwatch(); break;
+            case MODE_POMODORO:  drawPomodoro();  break;
+            case MODE_WEATHER:   drawWeatherScreen(); break;
+            case MODE_CONFIG:    drawConfigMenu(MenuManager::configSelectedIndex()); break;
+            default:             c->fillScreen(0x0000); break;
+          }
+          transitionSuppressPush = false;
+          memcpy(transitionTargetBuf, c->getBuffer(), (size_t)fw * fh * 2);
+        }
+        targetCaptured = true;
+      }
+
+      // Slide out to the right: offset 0→fw. De-materialize: rowGap 1→4.
+      int16_t offset = (int16_t)(fw * p);
+      int16_t rowGap = (int16_t)lerpF(1.0f, 4.0f, p * 1.33f);
+      if (rowGap < 1) rowGap = 1;
+
+      c->fillScreen(0x0000);
+      if (transitionTargetBuf && offset < fw) {
+        uint16_t *dst = c->getBuffer();
+        int16_t copyW = fw - offset;
+        for (int16_t y = 0; y < fh; y += rowGap)
+          memcpy(dst + y * fw + offset, transitionTargetBuf + y * fw, (size_t)copyW * 2);
+      }
+
+      // Lock-off flash at the start (p<0.15): brackets flash white then fade.
+      if (p < 0.15f) {
+        float flashT = 1.0f - (p / 0.15f);
+        uint16_t flashCol = lerp565(0x0000, 0xFFFF, flashT);
+        if (flashCol != 0x0000) {
+          drawCornerBrackets(c, 0, 0, fw, fh, 10, flashCol);
+          c->drawRect(1, 1, fw - 2, fh - 2, flashCol);
+        }
+      }
+
+      pushToDisplay();
+    } else {
+      // Phase 2: menu materializes — inverse of forward phase 1.
+      targetCaptured = false;
+      c->fillScreen(0x0000);
+
+      // Blink: 3 on-off cycles (same cadence as forward).
+      const bool visible = ((int)(p * 6.0f) % 2) == 0;
+
+      // Arc: grows 0→MENU_R, slides right -MENU_R→MENU_CX. Color amber→cyan.
+      float r  = lerpF(0.0f, (float)MENU_R, p);
+      float cx = lerpF(-(float)MENU_R, (float)MENU_CX, p);
+      int16_t cy = MENU_CY;
+
+      if (visible && r > 1.0f) {
+        uint16_t arcCol = lerp565(0xFCA0, 0x07FF, p);  // amber → cyan (power-up)
+        c->drawCircle((int16_t)cx, cy, (int16_t)r,     arcCol);
+        c->drawCircle((int16_t)cx, cy, (int16_t)r - 1, arcCol);
+      }
+
+      // Label: blinks, grows (text 1→6), slides right with the arc.
+      if (visible) {
+        const char* label = MenuManager::menuItemLabel(selectedIndex);
+        float labelX = cx + r;
+        uint8_t textSize = (uint8_t)lerpF(1.0f, 6.0f, p);
+        if (textSize < 1) textSize = 1;
+        uint16_t lw, lh;
+        text7segBounds(label, textSize, &lw, &lh);
+        int16_t tx = (int16_t)labelX;
+        int16_t ty = cy - (int16_t)lh / 2;
+        int16_t ghostOff = (int16_t)textSize / 2 + 1;
+        drawText7seg(c, label, tx - ghostOff, ty, textSize, 0x07FF);
+        drawText7seg(c, label, tx + ghostOff, ty, textSize, 0xF800);
+        drawText7seg(c, label, tx,           ty, textSize, 0xFFFF);
+        // Underline grows 0→full width (inverse of retreat).
+        int16_t underW = (int16_t)((float)lw * p);
+        if (underW > 0)
+          c->drawFastHLine(tx, ty + (int16_t)lh + 2, underW, 0x07FF);
+      }
+
+      pushToDisplay();
+    }
+    return;
+  }
+
+  // ===== FORWARD: menu → screen =====
   if (phase1) {
     targetCaptured = false;
     c->fillScreen(0x0000);
