@@ -169,6 +169,21 @@ void MenuManager::startScroll(int8_t dir) {
   _animating = true;
 }
 
+// ponytail: map a screen mode back to its top-level menu index, so exiting any
+// screen lands on the menu option it was entered from (rather than always 0).
+// Must stay in sync with the select handler's index -> _pendingMode mapping.
+static uint8_t modeToMenuIndex(AppMode m) {
+  switch (m) {
+    case MODE_WATCH:     return 0;
+    case MODE_STOPWATCH: return 1;
+    case MODE_POMODORO:  return 2;
+    case MODE_WEATHER:   return 3;
+    case MODE_CONFIG:    return NUM_ITEMS - 1; // 4
+    case MODE_TRANSITION: return modeToMenuIndex(MenuManager::pendingMode());
+    default:            return 0;
+  }
+}
+
 void MenuManager::handleEvent(ButtonEvent evt) {
   if (evt == EVENT_NONE) return;
 
@@ -194,8 +209,9 @@ void MenuManager::handleEvent(ButtonEvent evt) {
       _mode = MODE_MENU;
       _selectedIndex = NUM_ITEMS - 1;
     } else {
+      // Exit any screen back to its own menu entry (not always index 0).
+      _selectedIndex = modeToMenuIndex(_mode);
       _mode = MODE_MENU;
-      _selectedIndex = 0;
     }
     _dirty = true;
     Serial.printf("MENU: mode -> %d\n", (int)_mode);
@@ -220,9 +236,10 @@ void MenuManager::handleEvent(ButtonEvent evt) {
       _mode = MODE_MENU;
       _selectedIndex = NUM_ITEMS - 1;
     } else {
-      // From WATCH, STOPWATCH, POMODORO, WEATHER, CONFIG, TRANSITION -> go to menu
+      // From WATCH, STOPWATCH, POMODORO, WEATHER, TRANSITION -> go to menu,
+      // landing on the entry the screen was opened from.
+      _selectedIndex = modeToMenuIndex(_mode);
       _mode = MODE_MENU;
-      _selectedIndex = 0;
     }
     _dirty = true;
     Serial.printf("MENU: back -> mode %d\n", (int)_mode);
