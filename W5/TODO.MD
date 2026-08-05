@@ -1,5 +1,5 @@
 - [x] Add Pomodoro
-- [ ] Add screen off
+- [ ] Add screen off after no usage for 3 seconds except when charging and if stopwatch is running, and if pomodoro is blinking
 - [x] change order of direction of buttons (config screen and all its subsequent options)
 - [ ] improve asthetics of other sections to match asthetic of watch face, excluding the menu
 - [x] press time from watch to menu too long, halve it
