@@ -781,7 +781,7 @@ void DisplayManager::drawWeatherScreen() {
   // 185-235:   Legend + min/max + location (single row, 536px wide)
 
   // --- Title ---
-  drawText7seg(canvas, "WEATHER", 10, 5, 3, 0xFFE0); // yellow, size 3
+  drawText7seg(canvas, "WEATHER", 10, 5, 3, 0xBDF7); // light blue-white, size 3
 
   if (!WeatherManager::hasHourlyData()) {
     drawText7seg(canvas, "Fetching forecast...", 10, 40, 2, 0x7BEF);
@@ -947,6 +947,8 @@ void DisplayManager::drawWeatherScreen() {
 
   // --- Graph border ---
   canvas->drawRect(graphX, graphY, graphW, graphH, 0x4208); // dark gray border
+  // ponytail: watch-face-style corner brackets frame the graph (main readout).
+  drawCornerBrackets(canvas, graphX - 4, graphY - 4, graphW + 8, graphH + 8, 8, 0x7BEF);
 
   // --- Temperature ruler (left side) ---
   // ponytail: 3 tick marks + labels (max, mid, min) aligned to the graph's y-scale.
@@ -1040,6 +1042,10 @@ void DisplayManager::drawWifiConnecting() {
   drawText7seg(canvas, msg, (canvas->width() - w) / 2, iconY + 48 + 10, 2,
           0x7BEF); // gray
 
+  // ponytail: frame the icon + message block (main readout).
+  drawCornerBrackets(canvas, iconX - 6, iconY - 6,
+                     48 + 12, 48 + 10 + (int16_t)h + 12, 6, 0x7BEF);
+
   pushToDisplay();
 }
 
@@ -1050,7 +1056,7 @@ void DisplayManager::drawConfigMenu(uint8_t selectedIndex) {
   canvas->fillScreen(0x0000);
 
   // Title
-  drawText7seg(canvas, "CONFIG", 10, 10, 3, 0xFFE0); // yellow
+  drawText7seg(canvas, "CONFIG", 10, 10, 3, 0xBDF7); // light blue-white
 
   const uint8_t count = MenuManager::configItemCount();
   // ponytail: hard-coded vertical list spacing. Works for the current 1–3 items;
@@ -1083,6 +1089,10 @@ void DisplayManager::drawConfigMenu(uint8_t selectedIndex) {
     }
   }
 
+  // ponytail: frame the config list (main readout) with corner brackets.
+  drawCornerBrackets(canvas, 4, startY - 4,
+                     canvas->width() - 8, (int16_t)count * itemH + 8, 8, 0x7BEF);
+
   pushToDisplay();
 }
 
@@ -1096,7 +1106,7 @@ void DisplayManager::drawWifiPortalScreen() {
   const char* title = "WIFI SETUP";
   uint16_t w, h;
   text7segBounds(title, 3, &w, &h);
-  drawText7seg(canvas, title, (canvas->width() - w) / 2, 15, 3, 0x07FF); // cyan
+  drawText7seg(canvas, title, (canvas->width() - w) / 2, 15, 3, 0xBDF7); // light blue-white
 
   // Wi-Fi icon
   int16_t iconX = (canvas->width() - 48) / 2;
@@ -1108,12 +1118,21 @@ void DisplayManager::drawWifiPortalScreen() {
   const char* line2 = "Open 192.168.4.1";
   const char* line3 = "Enter Wi-Fi details";
 
-  text7segBounds(line1, 2, &w, &h);
+  uint16_t maxW = 0;
+  text7segBounds(line1, 2, &w, &h); if (w > maxW) maxW = w;
   drawText7seg(canvas, line1, (canvas->width() - w) / 2, iconY + 48 + 20, 2, 0xFFFF);
-  text7segBounds(line2, 2, &w, &h);
+  text7segBounds(line2, 2, &w, &h); if (w > maxW) maxW = w;
   drawText7seg(canvas, line2, (canvas->width() - w) / 2, iconY + 48 + 45, 2, 0xFFFF);
-  text7segBounds(line3, 2, &w, &h);
+  text7segBounds(line3, 2, &w, &h); if (w > maxW) maxW = w;
   drawText7seg(canvas, line3, (canvas->width() - w) / 2, iconY + 48 + 70, 2, 0x7BEF);
+
+  // ponytail: frame the icon + instructions block (main readout).
+  {
+    int16_t bw = (maxW > 48) ? (int16_t)maxW : 48;
+    int16_t bx = (canvas->width() - bw) / 2;
+    int16_t bh = 48 + 70 + (int16_t)h + 12;
+    drawCornerBrackets(canvas, bx - 6, iconY - 6, bw + 12, bh, 6, 0x7BEF);
+  }
 
   pushToDisplay();
 }
@@ -1128,7 +1147,7 @@ void DisplayManager::drawWifiResultScreen(bool connected, const String &message)
   const char* title = "WIFI SETUP";
   uint16_t w, h;
   text7segBounds(title, 3, &w, &h);
-  drawText7seg(canvas, title, (canvas->width() - w) / 2, 15, 3, 0x07FF);
+  drawText7seg(canvas, title, (canvas->width() - w) / 2, 15, 3, 0xBDF7); // light blue-white
 
   // Status icon
   int16_t iconX = (canvas->width() - 48) / 2;
@@ -1139,6 +1158,7 @@ void DisplayManager::drawWifiResultScreen(bool connected, const String &message)
   // Status word
   const char* status = connected ? "Connected" : "Failed";
   text7segBounds(status, 3, &w, &h);
+  uint16_t statusW = w;
   drawText7seg(canvas, status, (canvas->width() - w) / 2, iconY + 48 + 15, 3,
           iconCol);
 
@@ -1150,6 +1170,15 @@ void DisplayManager::drawWifiResultScreen(bool connected, const String &message)
   text7segBounds(msg.c_str(), 2, &w, &h);
   drawText7seg(canvas, msg.c_str(), (canvas->width() - w) / 2, iconY + 48 + 55, 2,
           0xFFFF);
+
+  // ponytail: frame the icon + status + message block (main readout).
+  {
+    uint16_t bw = (statusW > w) ? statusW : w;
+    if (bw < 48) bw = 48;
+    int16_t bx = (canvas->width() - (int16_t)bw) / 2;
+    int16_t bh = 48 + 55 + (int16_t)h + 12;
+    drawCornerBrackets(canvas, bx - 6, iconY - 6, (int16_t)bw + 12, bh, 6, 0x7BEF);
+  }
 
   pushToDisplay();
 }
@@ -1197,6 +1226,12 @@ void DisplayManager::drawStopwatch() {
   text7segBounds(timeStr.c_str(), 8, &w, &h);
   drawText7seg(canvas, timeStr.c_str(), (canvas->width() - w) / 2,
           (canvas->height() - h) / 2, 8, 0xFFFF); // white
+  // ponytail: watch-face-style corner brackets frame the main readout.
+  {
+    int16_t tx = (canvas->width() - (int16_t)w) / 2;
+    int16_t ty = (canvas->height() - (int16_t)h) / 2;
+    drawCornerBrackets(canvas, tx - 4, ty - 4, (int16_t)w + 8, (int16_t)h + 8, 8, 0x7BEF);
+  }
 
   // ----- Lap line (below time) or controls hint -----
   uint8_t laps = StopwatchManager::getLapCount();
@@ -1275,6 +1310,12 @@ void DisplayManager::drawPomodoro() {
   text7segBounds(timeStr.c_str(), 8, &w, &h);
   drawText7seg(canvas, timeStr.c_str(), (canvas->width() - w) / 2,
           (canvas->height() - h) / 2, 8, 0xFFFF); // white
+  // ponytail: watch-face-style corner brackets frame the main readout.
+  {
+    int16_t tx = (canvas->width() - (int16_t)w) / 2;
+    int16_t ty = (canvas->height() - (int16_t)h) / 2;
+    drawCornerBrackets(canvas, tx - 4, ty - 4, (int16_t)w + 8, (int16_t)h + 8, 8, 0x7BEF);
+  }
 
   // ----- Session count (below timer) -----
   uint8_t sessions = PomodoroManager::getCompletedWorkCount();
@@ -1887,7 +1928,7 @@ void DisplayManager::drawMenuStylePicker(uint8_t pickerIndex) {
   c->fillScreen(0x0000);
 
   // Title
-  drawText7seg(c, "MENU STYLE", 10, 10, 3, 0xFFE0);  // yellow
+  drawText7seg(c, "MENU STYLE", 10, 10, 3, 0xBDF7);  // light blue-white
 
   const uint8_t count = MenuManager::menuStyleCount();
   const MenuStyle applied = MenuManager::menuStyle();
@@ -1927,7 +1968,7 @@ void DisplayManager::drawBrightnessPicker(uint8_t pickerIndex) {
   c->fillScreen(0x0000);
 
   // Title
-  drawText7seg(c, "BRIGHTNESS", 10, 10, 3, 0xFFE0);  // yellow
+  drawText7seg(c, "BRIGHTNESS", 10, 10, 3, 0xBDF7);  // light blue-white
 
   // ponytail: 16-segment horizontal bar. Each filled segment = one level.
   // segW/gap chosen so the bar spans most of the 536px width.
