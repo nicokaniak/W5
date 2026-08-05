@@ -1384,6 +1384,10 @@ static void drawMenuLabel(GFXcanvas16 *c, int16_t ax, int16_t ay,
       int16_t iconY = ay - (int16_t)ih / 2;
       c->drawBitmap(iconX, iconY, bm, iw, ih, textCol);
     }
+    // ponytail: cyan underline beneath the selected item's label — the visual
+    // anchor that blinks and retreats left during the transition.
+    if (isSelected)
+      c->drawFastHLine(tx, ty + (int16_t)h + 2, (int16_t)w, 0x07FF);
   }
 }
 
@@ -1638,13 +1642,16 @@ void DisplayManager::drawMenu(uint8_t selectedIndex, int8_t scrollDir, float t) 
   pushToDisplay();
 }
 
-// ponytail: blink-shrink-slide transition. Phase 1: the semi-circle arc and
-// the selected item's label blink 3x while shrinking and sliding left off the
-// screen edge. Phase 2: the target screen is rendered once into a PSRAM buffer
-// (suppressing the display push), then blitted row-by-row at a decreasing
-// horizontal offset so it slides in from right to left over black. The target
-// renderers take 15-30ms but are called only ONCE (at phase 2 entry); each
-// slide frame is just a fillScreen + memcpy (~5ms), giving smooth motion.
+// ponytail: sci-fi blink-shrink-slide transition.
+// Phase 1 (power-down): the semi-circle arc shifts cyan→amber as it shrinks
+// and slides left off-screen; the selected label blinks 3x with chromatic
+// aberration (red+cyan ghost copies) — reads as a hologram destabilizing.
+// Phase 2 (signal acquire): the target screen is rendered once into a PSRAM
+// buffer, then slides in right→left while materializing via a scanline reveal
+// (every Nth row initially, gaps fill as it settles). A lock-on flash (white
+// corner brackets) snaps on near the end and fades as the screen locks in.
+// Target renderers (15-30ms) run only ONCE at phase 2 entry; each frame after
+// is fillScreen + memcpy (~5ms), keeping the slide smooth.
 void DisplayManager::drawTransition(uint8_t selectedIndex, float progress) {
   if (!canvas) return;
   GFXcanvas16 *c = canvas;
@@ -1662,21 +1669,23 @@ void DisplayManager::drawTransition(uint8_t selectedIndex, float progress) {
     c->fillScreen(0x0000);
 
     // Blink: 3 on-off cycles over phase 1 → (int)(p*6)%2==0 means visible.
-    bool visible = ((int)(p * 6.0f) % 2) == 0;
+    const bool visible = ((int)(p * 6.0f) % 2) == 0;
 
     // Arc: radius shrinks MENU_R→0, center slides MENU_CX→-MENU_R (off left).
+    // Color shifts cyan→amber (power-down) as it collapses.
     float r  = lerpF((float)MENU_R, 0.0f, p);
     float cx = lerpF((float)MENU_CX, -(float)MENU_R, p);
     int16_t cy = MENU_CY;
 
     if (visible && r > 1.0f) {
-      uint16_t arcCol = 0x07FF;  // cyan
+      uint16_t arcCol = lerp565(0x07FF, 0xFCA0, p);  // cyan → amber
       c->drawCircle((int16_t)cx, cy, (int16_t)r,     arcCol);
       c->drawCircle((int16_t)cx, cy, (int16_t)r - 1, arcCol);
     }
 
     // Label: blinks, shrinks (text size 6→1), slides left with the arc.
-    // Sits at arc angle 0 → (cx + r, cy), same point the selected dot was.
+    // Chromatic aberration: red ghost +2px, cyan ghost -2px around the white
+    // core → hologram-glitch look. Ghost offset scales with text size.
     if (visible) {
       const char* label = MenuManager::menuItemLabel(selectedIndex);
       float labelX = cx + r;
@@ -1686,7 +1695,15 @@ void DisplayManager::drawTransition(uint8_t selectedIndex, float progress) {
       text7segBounds(label, textSize, &lw, &lh);
       int16_t tx = (int16_t)labelX;
       int16_t ty = cy - (int16_t)lh / 2;
-      drawText7seg(c, label, tx, ty, textSize, 0x07FF);
+      int16_t ghostOff = (int16_t)textSize / 2 + 1;
+      drawText7seg(c, label, tx - ghostOff, ty, textSize, 0x07FF);  // cyan ghost
+      drawText7seg(c, label, tx + ghostOff, ty, textSize, 0xF800);  // red ghost
+      drawText7seg(c, label, tx,           ty, textSize, 0xFFFF);  // white core
+      // ponytail: retreating underline — full width at p=0, shrinks to 0 as the
+      // label collapses. Sits under the label and slides left with it.
+      int16_t underW = (int16_t)((float)lw * (1.0f - p));
+      if (underW > 0)
+        c->drawFastHLine(tx, ty + (int16_t)lh + 2, underW, 0x07FF);
     }
 
     pushToDisplay();
@@ -1716,13 +1733,31 @@ void DisplayManager::drawTransition(uint8_t selectedIndex, float progress) {
 
     // offset: fw (fully off right) → 0 (in place). Visible width = fw - offset.
     int16_t offset = (int16_t)(fw * (1.0f - p));
+    // Scanline reveal: row gap decreases 4→1 as p→1. At p=0 only every 4th row
+    // copies (sparse materialization); at p≥0.75 every row copies (full image).
+    // Ceiling: gap=4 was tuned by eye on 240px height; raise for denser scanlines.
+    int16_t rowGap = (int16_t)lerpF(4.0f, 1.0f, p * 1.33f);
+    if (rowGap < 1) rowGap = 1;
+
     c->fillScreen(0x0000);
     if (transitionTargetBuf && offset < fw) {
       uint16_t *dst = c->getBuffer();
       int16_t copyW = fw - offset;
-      for (int16_t y = 0; y < fh; y++)
+      for (int16_t y = 0; y < fh; y += rowGap)
         memcpy(dst + y * fw + offset, transitionTargetBuf + y * fw, (size_t)copyW * 2);
     }
+
+    // Lock-on flash: white corner brackets snap on at p>0.85 and fade out as
+    // the screen settles into place. The snap-on is the "lock" beat.
+    if (p > 0.85f) {
+      float flashT = (p - 0.85f) / 0.15f;          // 0→1 over the last 15%
+      uint16_t flashCol = lerp565(0xFFFF, 0x0000, flashT);  // white → black
+      if (flashCol != 0x0000) {
+        drawCornerBrackets(c, 0, 0, fw, fh, 10, flashCol);
+        c->drawRect(1, 1, fw - 2, fh - 2, flashCol);
+      }
+    }
+
     pushToDisplay();
   }
 }

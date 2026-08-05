@@ -1,7 +1,7 @@
 - [x] Add Pomodoro
 - [ ] Add screen off
 - [x] change order of direction of buttons (config screen and all its subsequent options)
-- [ ] improve asthetics of other sections to match asthetic of watch
+- [ ] improve asthetics of other sections to match asthetic of watch face
 - [x] press time from watch to menu too long, halve it
 - [x] animation transition from menu to secondary screen:  blink name of selected item, reduce semi circle while blinking and slide ing to the left giving place to the new screen
 - [x] whene exiting any screen, we should exit to its option in the menu as if we left from it
