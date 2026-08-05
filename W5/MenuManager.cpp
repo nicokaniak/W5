@@ -264,13 +264,13 @@ void MenuManager::handleEvent(ButtonEvent evt) {
   if (_mode == MODE_MENU_STYLE) {
     switch (evt) {
       case EVENT_TOP_CLICK:
-        _stylePickerIndex = (MenuStyle)((_stylePickerIndex + 1) % MENU_STYLE_COUNT);
+        _stylePickerIndex = (MenuStyle)((_stylePickerIndex + MENU_STYLE_COUNT - 1) % MENU_STYLE_COUNT);
         _dirty = true;
         Serial.printf("STYLE: cursor -> %u (%s)\n", (uint8_t)_stylePickerIndex,
                       MENU_STYLE_LABELS[_stylePickerIndex]);
         break;
       case EVENT_BOTTOM_CLICK:
-        _stylePickerIndex = (MenuStyle)((_stylePickerIndex + MENU_STYLE_COUNT - 1) % MENU_STYLE_COUNT);
+        _stylePickerIndex = (MenuStyle)((_stylePickerIndex + 1) % MENU_STYLE_COUNT);
         _dirty = true;
         Serial.printf("STYLE: cursor -> %u (%s)\n", (uint8_t)_stylePickerIndex,
                       MENU_STYLE_LABELS[_stylePickerIndex]);
@@ -292,14 +292,14 @@ void MenuManager::handleEvent(ButtonEvent evt) {
   if (_mode == MODE_BRIGHTNESS) {
     switch (evt) {
       case EVENT_TOP_CLICK:
-        _brightnessPicker = (_brightnessPicker + 1) % BRIGHTNESS_LEVELS;
+        _brightnessPicker = (_brightnessPicker + BRIGHTNESS_LEVELS - 1) % BRIGHTNESS_LEVELS;
         lcd_brightness(brightnessValue(_brightnessPicker)); // live preview
         _dirty = true;
         Serial.printf("BRIGHT: cursor -> %u (DBV %u)\n",
                       _brightnessPicker, brightnessValue(_brightnessPicker));
         break;
       case EVENT_BOTTOM_CLICK:
-        _brightnessPicker = (_brightnessPicker + BRIGHTNESS_LEVELS - 1) % BRIGHTNESS_LEVELS;
+        _brightnessPicker = (_brightnessPicker + 1) % BRIGHTNESS_LEVELS;
         lcd_brightness(brightnessValue(_brightnessPicker)); // live preview
         _dirty = true;
         Serial.printf("BRIGHT: cursor -> %u (DBV %u)\n",
@@ -322,12 +322,12 @@ void MenuManager::handleEvent(ButtonEvent evt) {
   if (_mode == MODE_CONFIG) {
     switch (evt) {
       case EVENT_TOP_CLICK:
-        _configIndex = (_configIndex + 1) % NUM_CONFIG_ITEMS;
+        _configIndex = (_configIndex + NUM_CONFIG_ITEMS - 1) % NUM_CONFIG_ITEMS;
         _dirty = true;
         Serial.printf("CONFIG: scroll -> %u (%s)\n", _configIndex, CONFIG_ITEMS[_configIndex]);
         break;
       case EVENT_BOTTOM_CLICK:
-        _configIndex = (_configIndex + NUM_CONFIG_ITEMS - 1) % NUM_CONFIG_ITEMS;
+        _configIndex = (_configIndex + 1) % NUM_CONFIG_ITEMS;
         _dirty = true;
         Serial.printf("CONFIG: scroll -> %u (%s)\n", _configIndex, CONFIG_ITEMS[_configIndex]);
         break;
