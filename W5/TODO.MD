@@ -10,6 +10,5 @@
 - [x] menu, ad downwardd 45 deg line to connect dot to horizontal line, privdes spacying for tag text
 - [x] pre selection tags in menue a bit brighter or whiter
 - [x] option colorschemes with color wheel color theory system and select main color for all pages, not only watch face
-- [ ] vertical indicator, for what?
-- [ ] change blue for the orange in the watchface
+- [ ] vertical indicator in watch face between the time anbd the globe that uses all the vertical availabel space, but for what?
 - [ ] Add screen off after no usage for 3 seconds except when charging and if stopwatch is running, and if pomodoro is blinking
