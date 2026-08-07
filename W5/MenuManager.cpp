@@ -33,11 +33,11 @@ static_assert(sizeof(MENU_STYLE_LABELS)/sizeof(MENU_STYLE_LABELS[0]) == MENU_STY
 // Compile-time guard: a config screen with zero items would be a broken state.
 static_assert(NUM_CONFIG_ITEMS > 0, "config menu must have at least one item");
 
-static const uint32_t ANIM_DURATION_MS = 350;  // scroll animation length
+static const uint32_t ANIM_DURATION_MS = 250;  // scroll animation length
 // ponytail: transition is longer than scroll — 3 blinks + shrink + slide-in
-// need more time than a simple carousel scroll. Ceiling: if blinks feel slow,
-// drop to 500; if slide feels rushed, raise to 700.
-static const uint32_t TRANSITION_DURATION_MS = 600;
+// need more time than a simple carousel scroll. 500ms keeps the blinks
+// readable while still feeling responsive; 600ms started to feel sluggish.
+static const uint32_t TRANSITION_DURATION_MS = 500;
 
 // ponytail: level 0..15 -> DBV 0..255 (level * 17). 17*15 = 255 exactly.
 // File-local so DisplayManager's picker can re-derive the same fill count from
@@ -164,10 +164,14 @@ float MenuManager::animProgress() {
   uint32_t dur = (_mode == MODE_TRANSITION) ? TRANSITION_DURATION_MS : ANIM_DURATION_MS;
   float t = (float)(millis() - _animStartTime) / (float)dur;
   if (t >= 1.0f) t = 1.0f;
-  // ponytail: smoothstep (t*t*(3-2*t)) — zero velocity at both endpoints.
-  // Items start gently, accelerate through the middle, decelerate to a stop.
-  // Feels like a physical carousel. Was ease-out (1-(1-t)^2) which jumped at t=0.
-  return t * t * (3.0f - 2.0f * t);
+  // ponytail: menu scroll uses quad ease-out (1-(1-t)^2) for a snappy start.
+  // It has a small initial jump, but that reads as immediate response on a
+  // wearable. Keep smoothstep for transitions so the 3 blinks and slide stay
+  // legible despite the shorter duration.
+  if (_mode == MODE_TRANSITION) {
+    return t * t * (3.0f - 2.0f * t);
+  }
+  return 1.0f - (1.0f - t) * (1.0f - t);
 }
 
 void MenuManager::updateAnimation() {
