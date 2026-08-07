@@ -27,10 +27,11 @@ static const uint32_t STOPWATCH_REDRAW_MS = 50;
 // burn SPI bandwidth for no perceptible change.
 static const uint32_t POMODORO_REDRAW_MS = 1000;
 // ponytail: ambient menu animation (radar sweep, dot pulse, scanlines, flicker)
-// runs at 20fps even when idle. Full framebuffer push (~27ms @ 75MHz SPI) caps
-// us near 30fps; 50ms is safe and reads as smooth. Ceiling: if styles grow
-// heavier per-frame draw work, drop to 15fps (66ms) before raising SPI clock.
-static const uint32_t MENU_REDRAW_MS = 50;
+// runs at 10fps when idle. Full framebuffer push (~27ms @ 75MHz SPI) caps us
+// near 30fps, and the menu styles add their own draw time, so 20fps idle was
+// starving the button-polling loop. 100ms gives more headroom for inputs and
+// still reads as live ambient motion.
+static const uint32_t MENU_REDRAW_MS = 100;
 
 static uint32_t lastWatchRedraw = 0;
 static uint32_t lastWeatherFetch = 0;

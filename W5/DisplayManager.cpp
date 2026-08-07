@@ -1432,7 +1432,8 @@ static void drawMenuLabel(GFXcanvas16 *c, int16_t ax, int16_t ay,
   const ColorPalette &pal = ColorScheme::currentPalette();
   if (closeness < 0.0f) closeness = 0.0f;
   if (closeness > 1.0f) closeness = 1.0f;
-  String label(MenuManager::menuItemLabel(labelIdx));
+  // ponytail: avoid a temporary String allocation per item per frame.
+  const char* label = MenuManager::menuItemLabel(labelIdx);
   bool isSelected = (closeness >= 0.6f);
   bool isFar      = (closeness < 0.25f);
   uint8_t  textSize = isSelected ? 6 : (isFar ? 2 : 4);
@@ -1440,7 +1441,7 @@ static void drawMenuLabel(GFXcanvas16 *c, int16_t ax, int16_t ay,
   // stay readable instead of dropping to near-black at the arc edges.
   uint16_t textCol  = lerp565(pal.dim, pal.text, closeness);
   uint16_t w, h;
-  text7segBounds(label.c_str(), textSize, &w, &h);
+  text7segBounds(label, textSize, &w, &h);
   int16_t halfH = (int16_t)h / 2;
   int16_t ty = ay - halfH;
   // ponytail: selected item gets a 45° downward leader from the dot to the
@@ -1449,12 +1450,11 @@ static void drawMenuLabel(GFXcanvas16 *c, int16_t ax, int16_t ay,
   int16_t tagOffset = isSelected ? ((int16_t)h - halfH + 2) : 6;
   int16_t tx = ax + tagOffset;
   if (isFar) {
-    uint16_t blurCol = textCol;
-    drawText7seg(c, label.c_str(), tx,     ty,     textSize, blurCol);
-    drawText7seg(c, label.c_str(), tx + 1, ty,     textSize, blurCol);
-    drawText7seg(c, label.c_str(), tx,     ty + 1, textSize, blurCol);
+    // ponytail: blur was 3 overdraws; on a slow SPI bus it costs too much for
+    // a far item. Single draw keeps it readable and frees frame time.
+    drawText7seg(c, label, tx, ty, textSize, textCol);
   } else {
-    drawText7seg(c, label.c_str(), tx, ty, textSize, textCol);
+    drawText7seg(c, label, tx, ty, textSize, textCol);
     uint8_t iconSize = isSelected ? 48 : 32;
     uint8_t iw = 0, ih = 0;
     const unsigned char *bm = menuIconBitmap(labelIdx, iconSize, &iw, &ih);
@@ -1490,8 +1490,10 @@ static void drawMenuHUD(GFXcanvas16 *c, uint8_t selectedIndex, int8_t scrollDir,
   c->drawCircle(cx, cy, r - 1, arcColor);
   c->drawCircle(cx, cy, r,     arcColor);
   c->drawCircle(cx, cy, r + 1, arcColor);
-  // tick gauge: every 3deg around the half-arc, majors at ±60/0
-  for (int a = -90; a <= 90; a += 3) {
+  // tick gauge: every 6deg around the half-arc, majors at ±60/0.
+  // ponytail: 3deg was 61 ticks; 6deg halves the trig+drawLine work and still
+  // reads as a gauge on a small AMOLED.
+  for (int a = -90; a <= 90; a += 6) {
     float rad = a * M_PI / 180.0f;
     bool major = (a % 60 == 0);
     int16_t tickLen = major ? 12 : 5;
@@ -1503,11 +1505,11 @@ static void drawMenuHUD(GFXcanvas16 *c, uint8_t selectedIndex, int8_t scrollDir,
     c->drawLine(x0, y0, x1, y1, col);
   }
   // radar sweep: full revolution ~4s when idle; centered during scroll.
-  // ponytail: trail faked with 5 dimmer line copies behind the sweep head —
-  // no alpha on Adafruit_GFX, so we lerp toward black for the fade.
+  // ponytail: trail faked with 3 dimmer line copies behind the sweep head
+  // instead of 5, cutting the drawLine count and the lerp loop.
   float sweepDeg = (scrollDir != 0) ? 0.0f
                   : fmodf(millis() / 22.0f, 180.0f) - 90.0f;
-  for (int k = 0; k < 5; k++) {
+  for (int k = 0; k < 3; k++) {
     float a = (sweepDeg - k * 7.0f) * M_PI / 180.0f;
     float intensity = (k == 0) ? 1.0f : (0.5f - k * 0.1f);
     uint16_t col = lerp565(0x0000, pal.primary, intensity);
@@ -1546,7 +1548,9 @@ static void drawMenuHUD(GFXcanvas16 *c, uint8_t selectedIndex, int8_t scrollDir,
 static void drawArcSegment(GFXcanvas16 *c, int16_t cx, int16_t cy,
                            int16_t rInner, int16_t rOuter,
                            float centerDeg, float halfSpanDeg, uint16_t color) {
-  for (float a = centerDeg - halfSpanDeg; a <= centerDeg + halfSpanDeg; a += 2.0f) {
+  // ponytail: 4deg steps halve the drawLine calls vs 2deg and still look smooth
+  // enough for the thin band/lit segment on this display.
+  for (float a = centerDeg - halfSpanDeg; a <= centerDeg + halfSpanDeg; a += 4.0f) {
     float rad = a * M_PI / 180.0f;
     int16_t x0 = cx + (int16_t)(rInner * cosf(rad));
     int16_t y0 = cy + (int16_t)(rInner * sinf(rad));
@@ -1568,9 +1572,10 @@ static void drawMenuHolo(GFXcanvas16 *c, uint8_t selectedIndex, int8_t scrollDir
   // ring outlines
   c->drawCircle(cx, cy, rIn,  pal.muted);
   c->drawCircle(cx, cy, rOut, pal.muted);
-  // CRT scanlines: every 3rd row a dim horizontal line over the menu area.
-  // ponytail: cheap CRT texture — 80 drawFastHLine calls, no per-pixel work.
-  for (int16_t y = 0; y < c->height(); y += 3)
+  // CRT scanlines: every 6th row a dim horizontal line over the menu area.
+  // ponytail: every 3rd was 80 drawFastHLine calls; every 6th is 40 and still
+  // reads as a CRT texture.
+  for (int16_t y = 0; y < c->height(); y += 6)
     c->drawFastHLine(0, y, c->width(), pal.muted);
   // items
   const uint8_t count = MenuManager::menuItemCount();
@@ -1642,8 +1647,10 @@ static void drawMenuData(GFXcanvas16 *c, uint8_t selectedIndex, int8_t scrollDir
     }
     c->fillCircle(ax, ay, dotRad, dotColor);
     drawMenuLabel(c, ax, ay, items[i].idx, cl);
-    // telemetry column under the label (near/selected only)
-    if (!isFar) {
+    // telemetry column under the label (near/selected only, and only when idle).
+    // ponytail: skip telemetry during scroll so the menu stays snappy while items
+    // are moving; the flicker isn't readable while scrolling anyway.
+    if (!isFar && scrollDir == 0) {
       uint8_t idx = items[i].idx;
       // flicker: dim/bright toggle every ~400ms, offset per item
       bool flicker = ((millis() + idx * 137) / 400) % 2 == 0;
@@ -1672,9 +1679,9 @@ static void drawMenuMinimal(GFXcanvas16 *c, uint8_t selectedIndex, int8_t scroll
   const int16_t cx = MENU_CX, cy = MENU_CY, r = MENU_R;
   // marching-ants dashed arc: 4px on / 4px off, phase rotates with millis().
   // ponytail: Adafruit_GFX has no dashed-circle, so we step around the half-arc
-  // in 2deg increments and draw short arc chords for "on" segments. ~45 calls.
+  // in 4deg increments and draw short arc chords for "on" segments. ~23 calls.
   float phase = fmodf(millis() / 400.0f, 8.0f);  // 0..8, wraps
-  for (int a = -90; a <= 90; a += 2) {
+  for (int a = -90; a <= 90; a += 4) {
     float pos = fmodf(a + 90 + phase, 8.0f);  // 0..8 along the dash cycle
     if (pos >= 4.0f) continue;  // gap
     float rad0 = a * M_PI / 180.0f;
@@ -1709,9 +1716,9 @@ static void drawMenuMinimal(GFXcanvas16 *c, uint8_t selectedIndex, int8_t scroll
     // bracket-wrapped label for selected: "( WATCH )"
     // ponytail: 7-seg font has no []/<>, only (). We wrap the label in parens.
     if (sel) {
-      String label(MenuManager::menuItemLabel(items[i].idx));
+      const char* label = MenuManager::menuItemLabel(items[i].idx);
       uint16_t w, h;
-      text7segBounds(label.c_str(), 6, &w, &h);
+      text7segBounds(label, 6, &w, &h);
       int16_t halfH = (int16_t)h / 2;
       int16_t ty = ay - halfH;
       int16_t tx = ax + (int16_t)h - halfH + 2;
