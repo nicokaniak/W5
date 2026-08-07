@@ -164,14 +164,10 @@ float MenuManager::animProgress() {
   uint32_t dur = (_mode == MODE_TRANSITION) ? TRANSITION_DURATION_MS : ANIM_DURATION_MS;
   float t = (float)(millis() - _animStartTime) / (float)dur;
   if (t >= 1.0f) t = 1.0f;
-  // ponytail: menu scroll uses quad ease-out (1-(1-t)^2) for a snappy start.
-  // It has a small initial jump, but that reads as immediate response on a
-  // wearable. Keep smoothstep for transitions so the 3 blinks and slide stay
-  // legible despite the shorter duration.
-  if (_mode == MODE_TRANSITION) {
-    return t * t * (3.0f - 2.0f * t);
-  }
-  return 1.0f - (1.0f - t) * (1.0f - t);
+  // ponytail: smoothstep for scroll and transition. The shorter 250ms scroll
+  // still feels snappier than the old 350ms, but avoids the first-frame jump
+  // that quad ease-out introduced on a low-fps wearable display.
+  return t * t * (3.0f - 2.0f * t);
 }
 
 void MenuManager::updateAnimation() {
