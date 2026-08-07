@@ -30,6 +30,7 @@ struct ColorPalette {
   uint16_t error;      // stopped / work / temp line (replaces red)
   uint16_t info;       // precipitation / low temp / long break (replaces light blue)
   uint16_t text;       // white text
+  uint16_t light;      // near-white text with a subtle hue tint
   uint16_t dim;        // gray text / brackets
   uint16_t muted;      // dark gray / scanlines / unselected dots
   uint16_t accent;     // bright highlight

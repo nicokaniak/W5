@@ -466,7 +466,7 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
   //                [YYYY]
   // DOW sized to match the date block height (~54px → dot size 7 = 56px).
   // Group pushed to the lower-left corner of the screen.
-  const uint16_t DATE_COLOR = pal.secondary; // light blue-white
+  const uint16_t DATE_COLOR = pal.light; // near-white with subtle tint
   const uint16_t LABEL_COLOR = pal.dim; // gray
 
   String dateStr = TimeManager::getCurrentDate(); // "Mon 25/12"
@@ -643,7 +643,7 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
   }
 
   const uint16_t SUN_COLOR = pal.warning; // orange
-  const uint16_t SUN_LABEL_COLOR = pal.secondary; // light blue-white
+  const uint16_t SUN_LABEL_COLOR = pal.light; // near-white with subtle tint
 
   // SR/SS times: inline (label next to time), stacked vertically at the
   // left, aligned with the date group rows. Frees vertical space under the

@@ -54,6 +54,7 @@ void ColorScheme::generatePalette(const ColorHSV &main, ColorSchemeType type,
 
   // Neutrals with a subtle tint from the main hue.
   out.text  = hsvTo565(0, 0, 255);
+  out.light = hsvTo565(h, 20, 255); // near-white, subtly tinted by main hue
   out.dim   = hsvTo565(h, 40, 170);
   out.muted = hsvTo565(h, 30, 70);
   out.accent = hsvTo565(h, s, v > 235 ? 255 : v + 20);
