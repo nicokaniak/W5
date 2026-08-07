@@ -6,8 +6,9 @@
 - [x] animation transition from menu to secondary screen:  blink name of selected item, reduce semi circle while blinking and slide ing to the left giving place to the new screen
 - [x] whene exiting any screen, we should exit to its option in the menu as if we left from it
 - [ ] change blue for the orange in the watchface
-- [ ] add calendar from google?
+- [NOP] add calendar from google?
 - [ ] vertical indicator, for what?
 - [ ] a bit of spacying for tags in menu roller
 - [ ] menu, ad downwardd 45 deg line to connect dot to horizontal line, privdes spacying for tag text
 - [ ] pre selection tags in menue a bit brighter or whiter
+- [ ] option colorschemes and select main color
