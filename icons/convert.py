@@ -23,6 +23,17 @@ ICON_SPECS = [
 ]
 SIZES = [48, 32]   # selected tier, near tier (far tier = text only, no icon)
 
+# Config screen hero icons: (filename, C symbol) in MenuManager CONFIG_ITEMS order.
+# These are drawn large on the right side of the config screen and change with
+# the selected item. 72x72 is 3x the 24x24 source so lines stay sharp.
+CONFIG_ICON_SPECS = [
+    ("config/wifi-cog.png",       "WIFI_COG"),       # 0: Setup Wi-Fi
+    ("config/panels-top-left.png", "PANELS_TOP_LEFT"), # 1: Menu Style
+    ("config/sun.png",            "SUN"),            # 2: Brightness
+    ("config/swatch-book.png",    "SWATCH_BOOK"),    # 3: Color Scheme
+]
+CONFIG_SIZES = [72]  # one large size for the config screen hero icon
+
 # Weather icons: (filename, C symbol) — 32x32 1-bit for the weather screen.
 WEATHER_ICON_SPECS = [
     ("sun.png",             "SUN"),
@@ -139,11 +150,66 @@ def main():
         "  return nullptr;",
         "}",
         "",
+    ]
+
+    # ---- Config screen hero icons ----
+    for fname, sym in CONFIG_ICON_SPECS:
+        path = os.path.join(ICONS_DIR, fname)
+        if not os.path.exists(path):
+            print(f"  SKIP missing: {fname}")
+            continue
+        im = Image.open(path).convert("RGBA")
+        alpha = im.getchannel("A")
+        for size in CONFIG_SIZES:
+            g = alpha.resize((size, size), Image.LANCZOS)
+            data = pack_1bit(g)
+            chunks.append(emit_array(f"ICON_{sym}_{size}", size, size, data))
+            chunks.append("")
+
+    # Lookup helper for the config screen hero icon.
+    config_labels = [
+        "Setup Wi-Fi (wifi-cog)",
+        "Menu Style (panels-top-left)",
+        "Brightness (sun)",
+        "Color Scheme (swatch-book)",
+    ]
+    chunks += [
+        "// Config screen hero icons (72x72, right side, changes with selection).",
+        "// labelIdx matches MenuManager CONFIG_ITEMS order.",
+        "inline const unsigned char* configIconBitmap(uint8_t labelIdx, uint8_t size,",
+        "                                        uint8_t* outW, uint8_t* outH) {",
+        "  switch (labelIdx) {",
+    ]
+    for i, (_, sym) in enumerate(CONFIG_ICON_SPECS):
+        chunks.append(f"    case {i}:  // {config_labels[i]}")
+        for s in CONFIG_SIZES:
+            chunks.append(
+                f"      if (size == {s}) {{ *outW = {s}; *outH = {s}; return ICON_{sym}_{s}; }}"
+            )
+        chunks.append("      break;")
+    chunks += [
+        "  }",
+        "  *outW = 0; *outH = 0;",
+        "  return nullptr;",
+        "}",
+        "",
         "#endif  // ICONS_H",
     ]
     with open(OUT, "w", newline="\n") as f:
         f.write("\n".join(chunks) + "\n")
     print(f"Wrote {OUT}")
+
+    # ponytail: self-check that the config hero icons we just claimed to emit
+    # actually landed in icons.h. Catches a drift between spec and output.
+    with open(OUT) as f:
+        icons_text = f.read()
+    for _, sym in CONFIG_ICON_SPECS:
+        for s in CONFIG_SIZES:
+            if f"ICON_{sym}_{s}" not in icons_text:
+                raise RuntimeError(f"config icon array missing from {OUT}: ICON_{sym}_{s}")
+    if "configIconBitmap" not in icons_text:
+        raise RuntimeError("configIconBitmap helper missing from icons.h")
+    print("  config icons self-check: OK")
 
     # ---- Weather icons ----
     weather_dir = os.path.join(REPO, "W5", "icons", "weather")

@@ -1082,16 +1082,19 @@ void DisplayManager::drawConfigMenu(uint8_t selectedIndex) {
 
     // Label
     drawText7seg(canvas, label, 35, y, 3, col);
+  }
 
-    // Icon for the Wi-Fi setup item; uses the same Wi-Fi bitmaps as the status screen.
-    if (i == 0) {
-      uint8_t iw = 0, ih = 0;
-      const unsigned char* bm = menuIconBitmap(5, sel ? 48 : 32, &iw, &ih);
-      if (bm) {
-        int16_t ix = canvas->width() - iw - 10;
-        int16_t iy = y + (itemH - ih) / 2;
-        canvas->drawBitmap(ix, iy, bm, iw, ih, col);
-      }
+  // Large hero icon on the center-right, changes with the selected config item.
+  // ponytail: 72x72 keeps the 24x24 source at an integer 3x scale so lines stay
+  // sharp; 40 px inset from the right edge and vertically centered.
+  {
+    const uint8_t heroSize = 72;
+    uint8_t iw = 0, ih = 0;
+    const unsigned char* bm = configIconBitmap(selectedIndex, heroSize, &iw, &ih);
+    if (bm) {
+      int16_t ix = canvas->width() - iw - 40;
+      int16_t iy = (canvas->height() - ih) / 2;
+      canvas->drawBitmap(ix, iy, bm, iw, ih, pal.primary);
     }
   }
 
