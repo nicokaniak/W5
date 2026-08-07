@@ -8,7 +8,7 @@
 
 - [NOP] add calendar from google?
 - [x] menu, ad downwardd 45 deg line to connect dot to horizontal line, privdes spacying for tag text
-- [ ] pre selection tags in menue a bit brighter or whiter
+- [x] pre selection tags in menue a bit brighter or whiter
 - [ ] option colorschemes and select main color
 - [ ] vertical indicator, for what?
 - [ ] change blue for the orange in the watchface

@@ -1418,7 +1418,7 @@ static void drawMenuLabel(GFXcanvas16 *c, int16_t ax, int16_t ay,
   int16_t tagOffset = isSelected ? ((int16_t)h - halfH + 2) : 6;
   int16_t tx = ax + tagOffset;
   if (isFar) {
-    uint16_t blurCol = lerp565(0x2104, 0x4208, closeness * 4.0f);
+    uint16_t blurCol = textCol;
     drawText7seg(c, label.c_str(), tx,     ty,     textSize, blurCol);
     drawText7seg(c, label.c_str(), tx + 1, ty,     textSize, blurCol);
     drawText7seg(c, label.c_str(), tx,     ty + 1, textSize, blurCol);
