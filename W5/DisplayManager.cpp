@@ -1069,6 +1069,7 @@ void DisplayManager::drawConfigMenu(uint8_t selectedIndex) {
   // in the 240px height with the title at the top.
   const int16_t startY = 58;
   const int16_t itemH  = 45;
+  uint16_t maxLabelW = 0;
 
   for (uint8_t i = 0; i < count; i++) {
     int16_t y = startY + i * itemH;
@@ -1082,6 +1083,11 @@ void DisplayManager::drawConfigMenu(uint8_t selectedIndex) {
 
     // Label
     drawText7seg(canvas, label, 35, y, 3, col);
+
+    // Track the widest label so the selection bracket fits all options.
+    uint16_t lw, lh;
+    text7segBounds(label, 3, &lw, &lh);
+    if (lw > maxLabelW) maxLabelW = lw;
   }
 
   // Large hero icon on the center-right, changes with the selected config item.
@@ -1098,9 +1104,16 @@ void DisplayManager::drawConfigMenu(uint8_t selectedIndex) {
     }
   }
 
-  // ponytail: frame the config list (main readout) with corner brackets.
-  drawCornerBrackets(canvas, 4, startY - 4,
-                     canvas->width() - 8, (int16_t)count * itemH + 8, 8, pal.dim);
+  // L-shaped corner brackets around the currently selected option, in the
+  // highlight color, instead of one big frame around the whole list.
+  {
+    int16_t sy = startY + (int16_t)selectedIndex * itemH;
+    int16_t bracketX = 4;
+    int16_t bracketY = sy - 4;
+    int16_t bracketW = (35 - bracketX) + (int16_t)maxLabelW + 10;
+    int16_t bracketH = itemH + 8;
+    drawCornerBrackets(canvas, bracketX, bracketY, bracketW, bracketH, 8, pal.primary);
+  }
 
   pushToDisplay();
 }
