@@ -272,17 +272,17 @@ static void text7segBounds(const char *s, uint8_t size, uint16_t *w, uint16_t *h
 // sun declination `dec` [rad] and subsolar longitude `subLon` [rad]. The user's
 // position is at the globe center (centered projection), drawn as a dot.
 // ponytail: per-pixel inverse orthographic + zenith test on ~pi*R^2 pixels.
-// At R=45 that's ~6360 px, each doing ~4 sin/cos + 1 atan2 + 1 asin in float.
-// ESP32 handles it in a few ms per frame. Ceiling: animating every frame or
-// enlarging R past ~120 would warrant a precomputed lat/lon LUT per radius.
+// At R=60 that's ~11,300 px. Use float (not double) throughout — the ESP32-S3 FPU
+// is single-precision; the old code used double and took ~1.2s per frame. With
+// float it should drop to ~30-50ms. Ceiling: R > ~120 might still need a LUT.
 // Twilight band: |cosZ| < TWILIGHT -> blend toward a dimmer shade for a soft
 // terminator instead of a hard 1-px edge. Cheap 3-step, no per-channel lerp.
 static void drawEarthGlobe(GFXcanvas16 *c, int16_t cx, int16_t cy, int16_t R,
-                           double centerLat, double centerLon,
-                           double dec, double subLon, uint16_t dotColor) {
+                           float centerLat, float centerLon,
+                           float dec, float subLon, uint16_t dotColor) {
   const ColorPalette &pal = ColorScheme::currentPalette();
-  const double sinCL = sin(centerLat), cosCL = cos(centerLat);
-  const double sinD  = sin(dec),       cosD  = cos(dec);
+  const float sinCL = sinf(centerLat), cosCL = cosf(centerLat);
+  const float sinD  = sinf(dec),       cosD  = cosf(dec);
   // RGB565 palette — black & white like the old moon.
   //   Day:   sea = white, land = black
   //   Night: sea = dark gray, land = black   (hard terminator, no band)
@@ -315,21 +315,22 @@ static void drawEarthGlobe(GFXcanvas16 *c, int16_t cx, int16_t cy, int16_t R,
     for (int16_t dx = -xspan; dx <= xspan; dx++) {
       int16_t px = cx + dx;
       if (px < 0 || px >= c->width()) continue;
-      double lat, lon;
+      float lat, lon;
       float rho = sqrtf((float)(dx * dx + dy * dy));
       if (rho < 0.5f) {
         lat = centerLat; lon = centerLon;
       } else {
         // screen y is down; geographic lat is up -> use -dy for north.
-        double c_ang = asin((double)rho / R);
-        double sc = sin(c_ang), cc = cos(c_ang);
-        double ux =  dx / rho, uy = -dy / rho; // unit screen vector (east, north)
-        lat = asin(cc * sinCL + uy * sc * cosCL);
-        lon = centerLon + atan2(ux * sc, cc * cosCL - uy * sc * sinCL);
+        float c_ang = asinf(rho / R);
+        float sc = sinf(c_ang), cc = cosf(c_ang);
+        float ux =  dx / rho, uy = -dy / rho; // unit screen vector (east, north)
+        lat = asinf(cc * sinCL + uy * sc * cosCL);
+        lon = centerLon + atan2f(ux * sc, cc * cosCL - uy * sc * sinCL);
       }
-      bool land = earthIsLand(lat * 180.0 / M_PI, lon * 180.0 / M_PI);
-      double cosZ = sin(lat) * sinD + cos(lat) * cosD * cos(lon - subLon);
-      bool night = (cosZ <= 0.0);
+      bool land = earthIsLand(lat * 180.0f / (float)M_PI,
+                              lon * 180.0f / (float)M_PI);
+      float cosZ = sinf(lat) * sinD + cosf(lat) * cosD * cosf(lon - subLon);
+      bool night = (cosZ <= 0.0f);
       uint16_t col = night ? (land ? LAND_NIGHT : SEA_NIGHT)
                            : (land ? LAND_DAY : SEA_DAY);
       c->drawPixel(px, py, col);
@@ -629,16 +630,17 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
   //   subLon    = (12 - utcHours) * 15 deg             utcHours = local - tz
   {
     int doy = haveTime ? timeinfo.tm_yday + 1 : 1;        // 1..365
-    double decDeg = -23.44 * cos(2.0 * M_PI / 365.0 * (doy + 10));
-    double utcHours = haveTime
-      ? (timeinfo.tm_hour + timeinfo.tm_min / 60.0 - tzOffset)
-      : 12.0;
-    double subLonDeg = (12.0 - utcHours) * 15.0;
-    while (subLonDeg >  180.0) subLonDeg -= 360.0;
-    while (subLonDeg < -180.0) subLonDeg += 360.0;
+    float decDeg = -23.44f * cosf(2.0f * (float)M_PI / 365.0f * (doy + 10));
+    float utcHours = haveTime
+      ? (timeinfo.tm_hour + timeinfo.tm_min / 60.0f - tzOffset)
+      : 12.0f;
+    float subLonDeg = (12.0f - utcHours) * 15.0f;
+    while (subLonDeg >  180.0f) subLonDeg -= 360.0f;
+    while (subLonDeg < -180.0f) subLonDeg += 360.0f;
+    const float D2R = (float)M_PI / 180.0f;
     drawEarthGlobe(canvas, globeCx, globeCy, GLOBE_R,
-                   lat * M_PI / 180.0, lon * M_PI / 180.0,
-                   decDeg * M_PI / 180.0, subLonDeg * M_PI / 180.0,
+                   lat * D2R, lon * D2R,
+                   decDeg * D2R, subLonDeg * D2R,
                    pal.primary); // red position dot
   }
 
