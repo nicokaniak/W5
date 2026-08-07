@@ -723,7 +723,7 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
   bool tempValid = tempStr.length() > 0 &&
                    (isDigit(tempStr.charAt(0)) || tempStr.charAt(0) == '-');
   if (tempValid) {
-    canvas->drawBitmap(rightX, 207, FICON_THERMOMETER, TICON_W, TICON_H, TEMP_COLOR);
+    canvas->drawBitmap(rightX, 207, FICON_THERMOMETER, TICON_W, TICON_H, SUN_COLOR);
     int dotPos = tempStr.indexOf('.');
     int tempInt = (dotPos > 0) ? tempStr.substring(0, dotPos).toInt()
                                 : tempStr.toInt();
@@ -735,7 +735,7 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
     }
     drawText7seg(canvas, "C", rightX + 2 * (16 + 3) + 44, 207, 2, TEMP_COLOR);
   } else {
-    canvas->drawBitmap(rightX, 207, FICON_THERMOMETER, TICON_W, TICON_H, LABEL_COLOR);
+    canvas->drawBitmap(rightX, 207, FICON_THERMOMETER, TICON_W, TICON_H, SUN_COLOR);
     drawText7seg(canvas, "--", rightX + 24, 207, 2, LABEL_COLOR);
   }
 
