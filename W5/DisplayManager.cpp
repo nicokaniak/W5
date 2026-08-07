@@ -1,4 +1,5 @@
 #include "DisplayManager.h"
+#include "ColorScheme.h"
 #include "BatteryManager.h"
 #include "RM67162Display.h"
 #include "MenuManager.h"
@@ -279,20 +280,21 @@ static void text7segBounds(const char *s, uint8_t size, uint16_t *w, uint16_t *h
 static void drawEarthGlobe(GFXcanvas16 *c, int16_t cx, int16_t cy, int16_t R,
                            double centerLat, double centerLon,
                            double dec, double subLon, uint16_t dotColor) {
+  const ColorPalette &pal = ColorScheme::currentPalette();
   const double sinCL = sin(centerLat), cosCL = cos(centerLat);
   const double sinD  = sin(dec),       cosD  = cos(dec);
   // RGB565 palette — black & white like the old moon.
   //   Day:   sea = white, land = black
   //   Night: sea = dark gray, land = black   (hard terminator, no band)
-  const uint16_t SEA_DAY   = 0xFFFF; // white
-  const uint16_t SEA_NIGHT = 0x4208; // dark gray
+  const uint16_t SEA_DAY   = pal.text; // white
+  const uint16_t SEA_NIGHT = pal.muted; // dark gray
   const uint16_t LAND_DAY  = 0x0000; // black
   const uint16_t LAND_NIGHT= 0x0000; // black
-  const uint16_t RIM       = 0x8410; // dim gray outline
+  const uint16_t RIM       = pal.muted; // dim gray outline
   // Whitish rim drawn around land masses on the night side only, so the
   // continents stay readable against the dark night ocean. Light gray
   // (~197,194,197) reads as "whitish" next to black land / dark-gray sea.
-  const uint16_t NIGHT_LAND_RIM = 0xC618;
+  const uint16_t NIGHT_LAND_RIM = pal.text;
 
   int32_t R2 = (int32_t)R * R;
   // Per-pixel flags buffered during the fill so the night-side land outline
@@ -408,6 +410,7 @@ static int isoWeek(const struct tm &t) {
 void DisplayManager::drawWatchFace(const String &timeStr) {
   if (!canvas)
     return;
+  const ColorPalette &pal = ColorScheme::currentPalette();
 
   // ----- Starfield watch face (adapted from watchy-starfield-main) -----
   // Layout (536x240 landscape):
@@ -435,7 +438,7 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
   // ponytail: clockW must match the actual rightmost pixel of MM's last digit,
   // not a naive 4*dw + colon + 2*gap — that undercounts by one inter-digit gap
   // and the corner brackets end up overlapping the time.
-  const uint16_t TIME_COLOR = 0xFFFF; // white
+  const uint16_t TIME_COLOR = pal.text; // white
   const int SCALE = 2;
   const int DW = 33 * SCALE;  // 66
   const int DH = 53 * SCALE;  // 106
@@ -463,8 +466,8 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
   //                [YYYY]
   // DOW sized to match the date block height (~54px → dot size 7 = 56px).
   // Group pushed to the lower-left corner of the screen.
-  const uint16_t DATE_COLOR = 0xBDF7; // light blue-white
-  const uint16_t LABEL_COLOR = 0x7BEF; // gray
+  const uint16_t DATE_COLOR = pal.secondary; // light blue-white
+  const uint16_t LABEL_COLOR = pal.dim; // gray
 
   String dateStr = TimeManager::getCurrentDate(); // "Mon 25/12"
 
@@ -555,7 +558,7 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
   const unsigned char *batIcon = charging
       ? (batIw = 32, batIh = 32, BATICON_BATTERY_CHARGING)
       : batteryIconBitmap(batPct, &batIw, &batIh);
-  const uint16_t ICON_COLOR = 0xFFFF; // white
+  const uint16_t ICON_COLOR = pal.text; // white
   const int16_t topRightMargin = 4;
   // Battery: native 32x32 → target 40x40
   const int16_t BAT_TW = 40, BAT_TH = 40;
@@ -626,7 +629,7 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
     drawEarthGlobe(canvas, globeCx, globeCy, GLOBE_R,
                    lat * M_PI / 180.0, lon * M_PI / 180.0,
                    decDeg * M_PI / 180.0, subLonDeg * M_PI / 180.0,
-                   0xF800); // red position dot
+                   pal.primary); // red position dot
   }
 
   // Sunrise/sunset via Dusk2Dawn
@@ -639,8 +642,8 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
                     timeinfo.tm_mday, false);
   }
 
-  const uint16_t SUN_COLOR = 0xFD20; // orange
-  const uint16_t SUN_LABEL_COLOR = 0xBDF7; // light blue-white
+  const uint16_t SUN_COLOR = pal.warning; // orange
+  const uint16_t SUN_LABEL_COLOR = pal.secondary; // light blue-white
 
   // SR/SS times: inline (label next to time), stacked vertically at the
   // left, aligned with the date group rows. Frees vertical space under the
@@ -691,7 +694,7 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
     const int16_t barY = 140;
     const int16_t barW = clockW;
     const int16_t barH = 20;
-    const uint16_t DOT_COLOR = 0x6B4E; // lighter blue-gray, sleepy
+    const uint16_t DOT_COLOR = pal.dim; // lighter blue-gray, sleepy
 
     // Dotted sleeping edges first, then border on top.
     // ponytail: uniform 3px-pitch dot grid. At barH=20 this yields 6 rows,
@@ -717,7 +720,7 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
 
   // Temperature (white, right column, aligned vertically with SS time)
   // ponytail: 24x24 thermometer icon replaces the old "T:" text label.
-  const uint16_t TEMP_COLOR = 0xFFFF; // white
+  const uint16_t TEMP_COLOR = pal.text; // white
   const int16_t TICON_W = 24, TICON_H = 24;
   String tempStr = WeatherManager::getTemperature();
   bool tempValid = tempStr.length() > 0 &&
@@ -770,6 +773,7 @@ void DisplayManager::drawWatchFace(const String &timeStr) {
 void DisplayManager::drawWeatherScreen() {
   if (!canvas)
     return;
+  const ColorPalette &pal = ColorScheme::currentPalette();
 
   canvas->fillScreen(0x0000);
 
@@ -781,11 +785,11 @@ void DisplayManager::drawWeatherScreen() {
   // 185-235:   Legend + min/max + location (single row, 536px wide)
 
   // --- Title ---
-  drawText7seg(canvas, "WEATHER", 10, 5, 3, 0xBDF7); // light blue-white, size 3
+  drawText7seg(canvas, "WEATHER", 10, 5, 3, pal.secondary); // light blue-white, size 3
 
   if (!WeatherManager::hasHourlyData()) {
-    drawText7seg(canvas, "Fetching forecast...", 10, 40, 2, 0x7BEF);
-    drawText7seg(canvas, "Updates every 10 min", 10, 65, 1, 0x7BEF);
+    drawText7seg(canvas, "Fetching forecast...", 10, 40, 2, pal.dim);
+    drawText7seg(canvas, "Updates every 10 min", 10, 65, 1, pal.dim);
     pushToDisplay();
     return;
   }
@@ -793,7 +797,7 @@ void DisplayManager::drawWeatherScreen() {
   const HourlyForecast &fc = WeatherManager::getHourlyForecast();
   uint8_t n = fc.count;
   if (n == 0) {
-    drawText7seg(canvas, "No data", 10, 40, 2, 0xF800);
+    drawText7seg(canvas, "No data", 10, 40, 2, pal.error);
     pushToDisplay();
     return;
   }
@@ -802,12 +806,12 @@ void DisplayManager::drawWeatherScreen() {
   uint8_t iw = 0, ih = 0;
   const unsigned char *icon = weatherIconBitmap(fc.weatherCode[0], &iw, &ih);
   if (icon) {
-    canvas->drawBitmap(canvas->width() - iw - 10, 5, icon, iw, ih, 0xFFFF);
+    canvas->drawBitmap(canvas->width() - iw - 10, 5, icon, iw, ih, pal.text);
   }
 
   // --- Current temperature text (below title) ---
   String currTemp = String((int)round(fc.temperature[0]));
-  drawText7seg(canvas, (currTemp + "C").c_str(), 140, 12, 2, 0xFFFF); // white, size 2
+  drawText7seg(canvas, (currTemp + "C").c_str(), 140, 12, 2, pal.text); // white, size 2
 
   // --- Graph area ---
   // ponytail: graph leaves 34px on the left for the temperature ruler labels.
@@ -824,7 +828,7 @@ void DisplayManager::drawWeatherScreen() {
   if (n < 2) {
     int16_t x = graphX + graphW / 2;
     int16_t y = graphY + graphH / 2;
-    canvas->fillCircle(x, y, 3, 0xF800);
+    canvas->fillCircle(x, y, 3, pal.error);
     pushToDisplay();
     return;
   }
@@ -849,8 +853,8 @@ void DisplayManager::drawWeatherScreen() {
 
   // --- Precipitation area (light blue fill) ---
   // ponytail: filled area chart using vertical strips per data point.
-  // RGB565 light blue: 0x4B5F (approx #29B5FE)
-  const uint16_t PRECIP_COLOR = 0x4B5F;
+  // RGB565 light blue: pal.info (approx #29B5FE)
+  const uint16_t PRECIP_COLOR = pal.info;
 
   for (uint8_t i = 0; i < n; i++) {
     int16_t x = graphX + (int16_t)(graphW * i) / (n - 1);
@@ -866,8 +870,8 @@ void DisplayManager::drawWeatherScreen() {
   }
 
   // --- Temperature line (red) ---
-  // ponytail: connected line graph. RGB565 red: 0xF800
-  const uint16_t TEMP_COLOR = 0xF800;
+  // ponytail: connected line graph. RGB565 red: pal.error
+  const uint16_t TEMP_COLOR = pal.error;
 
   auto tempY = [&](float t) -> int16_t {
     float frac = (t - tempMin) / (tempMax - tempMin);
@@ -909,9 +913,9 @@ void DisplayManager::drawWeatherScreen() {
     if (d < bestDiff) { bestDiff = d; avgIdx = i; }
   }
 
-  const uint16_t PEAK_COLOR = 0xFFE0; // yellow
-  const uint16_t LOW_COLOR  = 0x07FF; // cyan
-  const uint16_t AVG_COLOR  = 0x07E0; // green
+  const uint16_t PEAK_COLOR = pal.warning; // yellow
+  const uint16_t LOW_COLOR  = pal.info;    // cyan
+  const uint16_t AVG_COLOR  = pal.success; // green
   const int16_t lblH = 12;            // size-1 text height
   const int16_t lblW = 8;             // size-1 char width (approx, per digit)
 
@@ -946,14 +950,14 @@ void DisplayManager::drawWeatherScreen() {
   }
 
   // --- Graph border ---
-  canvas->drawRect(graphX, graphY, graphW, graphH, 0x4208); // dark gray border
+  canvas->drawRect(graphX, graphY, graphW, graphH, pal.muted); // dark gray border
   // ponytail: watch-face-style corner brackets frame the graph (main readout).
-  drawCornerBrackets(canvas, graphX - 4, graphY - 4, graphW + 8, graphH + 8, 8, 0x7BEF);
+  drawCornerBrackets(canvas, graphX - 4, graphY - 4, graphW + 8, graphH + 8, 8, pal.dim);
 
   // --- Temperature ruler (left side) ---
   // ponytail: 3 tick marks + labels (max, mid, min) aligned to the graph's y-scale.
   // Shows the actual temp range so you can read values off the red line.
-  const uint16_t RULER_COLOR = 0x8410; // dark gray
+  const uint16_t RULER_COLOR = pal.muted; // dark gray
   int tempHi = (int)tempMax; // already integer-bounded + padded
   int tempLo = (int)tempMin;
   int tempMid = (tempHi + tempLo) / 2;
@@ -969,7 +973,7 @@ void DisplayManager::drawWeatherScreen() {
     // label just left of the tick
     char buf[8];
     snprintf(buf, sizeof(buf), "%d", t.val);
-    drawText7seg(canvas, buf, graphX - 22, t.y - 4, 1, 0x7BEF);
+    drawText7seg(canvas, buf, graphX - 22, t.y - 4, 1, pal.dim);
   }
 
   // --- Hour labels under graph ---
@@ -980,7 +984,7 @@ void DisplayManager::drawWeatherScreen() {
     char buf[8];
     snprintf(buf, sizeof(buf), "%02d", fc.hour[i]);
     // Center the 2-char label on the data point
-    drawText7seg(canvas, buf, x - 6, labelY, 1, 0x7BEF); // gray, size 1
+    drawText7seg(canvas, buf, x - 6, labelY, 1, pal.dim); // gray, size 1
   }
 
   // --- Legend + location (single row at y=218) ---
@@ -993,18 +997,18 @@ void DisplayManager::drawWeatherScreen() {
 
   // Precipitation (was blue square) — droplet icon in precip color
   canvas->drawBitmap(10, legendY, LICON_DROPLETS, legendIcon, legendIcon, PRECIP_COLOR);
-  drawText7seg(canvas, "Rain", 28, legendY - 2, 1, 0x7BEF);
+  drawText7seg(canvas, "Rain", 28, legendY - 2, 1, pal.dim);
 
   // Temperature (was red line) — thermometer icon in temp color
   canvas->drawBitmap(90, legendY, LICON_THERMOMETER, legendIcon, legendIcon, TEMP_COLOR);
-  drawText7seg(canvas, "Temp", 108, legendY - 2, 1, 0x7BEF);
+  drawText7seg(canvas, "Temp", 108, legendY - 2, 1, pal.dim);
 
   // --- Location (right-aligned) with map-pin icon ---
   const char *locStr = "Copenhagen";
   const int16_t locX = canvas->width() - 90;
-  drawText7seg(canvas, locStr, locX, legendY - 2, 1, 0x7BEF);
+  drawText7seg(canvas, locStr, locX, legendY - 2, 1, pal.dim);
   // Pin sits just left of the city name, vertically centered on the text row
-  canvas->drawBitmap(locX - legendIcon - 2, legendY, LICON_MAP_PIN, legendIcon, legendIcon, 0x7BEF);
+  canvas->drawBitmap(locX - legendIcon - 2, legendY, LICON_MAP_PIN, legendIcon, legendIcon, pal.dim);
 
   pushToDisplay();
 }
@@ -1023,12 +1027,13 @@ static uint16_t lerp565(uint16_t a, uint16_t b, float t) {
 void DisplayManager::drawWifiConnecting() {
   if (!canvas)
     return;
+  const ColorPalette &pal = ColorScheme::currentPalette();
 
   canvas->fillScreen(0x0000);
 
   // Pulse: 0..1 oscillation, ~1.9s period
   float phase = sinf(millis() / 300.0f) * 0.5f + 0.5f;
-  uint16_t iconColor = lerp565(0x2104, 0x07FF, phase); // dark gray -> bright cyan
+  uint16_t iconColor = lerp565(pal.muted, pal.primary, phase); // dark gray -> bright cyan
 
   // Centered 48x48 wifi icon, slightly above center to leave room for text
   int16_t iconX = (canvas->width() - 48) / 2;   // 244
@@ -1040,11 +1045,11 @@ void DisplayManager::drawWifiConnecting() {
   uint16_t w, h;
   text7segBounds(msg, 2, &w, &h);
   drawText7seg(canvas, msg, (canvas->width() - w) / 2, iconY + 48 + 10, 2,
-          0x7BEF); // gray
+          pal.dim); // gray
 
   // ponytail: frame the icon + message block (main readout).
   drawCornerBrackets(canvas, iconX - 6, iconY - 6,
-                     48 + 12, 48 + 10 + (int16_t)h + 12, 6, 0x7BEF);
+                     48 + 12, 48 + 10 + (int16_t)h + 12, 6, pal.dim);
 
   pushToDisplay();
 }
@@ -1052,24 +1057,25 @@ void DisplayManager::drawWifiConnecting() {
 void DisplayManager::drawConfigMenu(uint8_t selectedIndex) {
   if (!canvas)
     return;
+  const ColorPalette &pal = ColorScheme::currentPalette();
 
   canvas->fillScreen(0x0000);
 
   // Title
-  drawText7seg(canvas, "CONFIG", 10, 10, 3, 0xBDF7); // light blue-white
+  drawText7seg(canvas, "CONFIG", 10, 10, 3, pal.secondary); // light blue-white
 
   const uint8_t count = MenuManager::configItemCount();
-  // ponytail: hard-coded vertical list spacing. Works for the current 1–3 items;
-  // beyond that the list overflows the 240px height and needs scrolling.
-  const int16_t startY = 80;
-  const int16_t itemH  = 55;
+  // ponytail: hard-coded vertical list spacing. itemH=45 fits 4 config items
+  // in the 240px height with the title at the top.
+  const int16_t startY = 58;
+  const int16_t itemH  = 45;
 
   for (uint8_t i = 0; i < count; i++) {
     int16_t y = startY + i * itemH;
     const char* label = MenuManager::configItemLabel(i);
     bool sel = (i == selectedIndex);
-    uint16_t col = sel ? 0x07FF : 0x7BEF;
-    uint16_t bulletCol = sel ? 0x07FF : 0x4208;
+    uint16_t col = sel ? pal.primary : pal.dim;
+    uint16_t bulletCol = sel ? pal.primary : pal.muted;
 
     // Bullet
     canvas->fillCircle(15, y + 12, 5, bulletCol);
@@ -1091,7 +1097,7 @@ void DisplayManager::drawConfigMenu(uint8_t selectedIndex) {
 
   // ponytail: frame the config list (main readout) with corner brackets.
   drawCornerBrackets(canvas, 4, startY - 4,
-                     canvas->width() - 8, (int16_t)count * itemH + 8, 8, 0x7BEF);
+                     canvas->width() - 8, (int16_t)count * itemH + 8, 8, pal.dim);
 
   pushToDisplay();
 }
@@ -1099,6 +1105,7 @@ void DisplayManager::drawConfigMenu(uint8_t selectedIndex) {
 void DisplayManager::drawWifiPortalScreen() {
   if (!canvas)
     return;
+  const ColorPalette &pal = ColorScheme::currentPalette();
 
   canvas->fillScreen(0x0000);
 
@@ -1106,12 +1113,12 @@ void DisplayManager::drawWifiPortalScreen() {
   const char* title = "WIFI SETUP";
   uint16_t w, h;
   text7segBounds(title, 3, &w, &h);
-  drawText7seg(canvas, title, (canvas->width() - w) / 2, 15, 3, 0xBDF7); // light blue-white
+  drawText7seg(canvas, title, (canvas->width() - w) / 2, 15, 3, pal.secondary); // light blue-white
 
   // Wi-Fi icon
   int16_t iconX = (canvas->width() - 48) / 2;
   int16_t iconY = 70;
-  canvas->drawBitmap(iconX, iconY, ICON_WIFI_48, 48, 48, 0x07FF);
+  canvas->drawBitmap(iconX, iconY, ICON_WIFI_48, 48, 48, pal.primary);
 
   // Instructions
   const char* line1 = "Connect to: W5-Setup";
@@ -1120,18 +1127,18 @@ void DisplayManager::drawWifiPortalScreen() {
 
   uint16_t maxW = 0;
   text7segBounds(line1, 2, &w, &h); if (w > maxW) maxW = w;
-  drawText7seg(canvas, line1, (canvas->width() - w) / 2, iconY + 48 + 20, 2, 0xFFFF);
+  drawText7seg(canvas, line1, (canvas->width() - w) / 2, iconY + 48 + 20, 2, pal.text);
   text7segBounds(line2, 2, &w, &h); if (w > maxW) maxW = w;
-  drawText7seg(canvas, line2, (canvas->width() - w) / 2, iconY + 48 + 45, 2, 0xFFFF);
+  drawText7seg(canvas, line2, (canvas->width() - w) / 2, iconY + 48 + 45, 2, pal.text);
   text7segBounds(line3, 2, &w, &h); if (w > maxW) maxW = w;
-  drawText7seg(canvas, line3, (canvas->width() - w) / 2, iconY + 48 + 70, 2, 0x7BEF);
+  drawText7seg(canvas, line3, (canvas->width() - w) / 2, iconY + 48 + 70, 2, pal.dim);
 
   // ponytail: frame the icon + instructions block (main readout).
   {
     int16_t bw = (maxW > 48) ? (int16_t)maxW : 48;
     int16_t bx = (canvas->width() - bw) / 2;
     int16_t bh = 48 + 70 + (int16_t)h + 12;
-    drawCornerBrackets(canvas, bx - 6, iconY - 6, bw + 12, bh, 6, 0x7BEF);
+    drawCornerBrackets(canvas, bx - 6, iconY - 6, bw + 12, bh, 6, pal.dim);
   }
 
   pushToDisplay();
@@ -1140,6 +1147,7 @@ void DisplayManager::drawWifiPortalScreen() {
 void DisplayManager::drawWifiResultScreen(bool connected, const String &message) {
   if (!canvas)
     return;
+  const ColorPalette &pal = ColorScheme::currentPalette();
 
   canvas->fillScreen(0x0000);
 
@@ -1147,12 +1155,12 @@ void DisplayManager::drawWifiResultScreen(bool connected, const String &message)
   const char* title = "WIFI SETUP";
   uint16_t w, h;
   text7segBounds(title, 3, &w, &h);
-  drawText7seg(canvas, title, (canvas->width() - w) / 2, 15, 3, 0xBDF7); // light blue-white
+  drawText7seg(canvas, title, (canvas->width() - w) / 2, 15, 3, pal.secondary); // light blue-white
 
   // Status icon
   int16_t iconX = (canvas->width() - 48) / 2;
   int16_t iconY = 60;
-  uint16_t iconCol = connected ? 0x07E0 : 0xF800;
+  uint16_t iconCol = connected ? pal.success : pal.error;
   canvas->drawBitmap(iconX, iconY, ICON_WIFI_48, 48, 48, iconCol);
 
   // Status word
@@ -1169,7 +1177,7 @@ void DisplayManager::drawWifiResultScreen(bool connected, const String &message)
   }
   text7segBounds(msg.c_str(), 2, &w, &h);
   drawText7seg(canvas, msg.c_str(), (canvas->width() - w) / 2, iconY + 48 + 55, 2,
-          0xFFFF);
+          pal.text);
 
   // ponytail: frame the icon + status + message block (main readout).
   {
@@ -1177,7 +1185,7 @@ void DisplayManager::drawWifiResultScreen(bool connected, const String &message)
     if (bw < 48) bw = 48;
     int16_t bx = (canvas->width() - (int16_t)bw) / 2;
     int16_t bh = 48 + 55 + (int16_t)h + 12;
-    drawCornerBrackets(canvas, bx - 6, iconY - 6, (int16_t)bw + 12, bh, 6, 0x7BEF);
+    drawCornerBrackets(canvas, bx - 6, iconY - 6, (int16_t)bw + 12, bh, 6, pal.dim);
   }
 
   pushToDisplay();
@@ -1200,6 +1208,7 @@ static String formatSw(uint32_t ms) {
 void DisplayManager::drawStopwatch() {
   if (!canvas)
     return;
+  const ColorPalette &pal = ColorScheme::currentPalette();
 
   canvas->fillScreen(0x0000);
 
@@ -1208,13 +1217,13 @@ void DisplayManager::drawStopwatch() {
   uint16_t statusColor;
   if (StopwatchManager::isRunning()) {
     status = "RUNNING";
-    statusColor = 0x07E0; // green
+    statusColor = pal.success; // green
   } else if (StopwatchManager::isStopped()) {
     status = "STOPPED";
-    statusColor = 0xF800; // red
+    statusColor = pal.error; // red
   } else {
     status = "READY";
-    statusColor = 0x07FF; // cyan
+    statusColor = pal.primary; // cyan
   }
 
   uint16_t w, h;
@@ -1225,12 +1234,12 @@ void DisplayManager::drawStopwatch() {
   String timeStr = formatSw(StopwatchManager::getElapsedMs());
   text7segBounds(timeStr.c_str(), 8, &w, &h);
   drawText7seg(canvas, timeStr.c_str(), (canvas->width() - w) / 2,
-          (canvas->height() - h) / 2, 8, 0xFFFF); // white
+          (canvas->height() - h) / 2, 8, pal.text); // white
   // ponytail: watch-face-style corner brackets frame the main readout.
   {
     int16_t tx = (canvas->width() - (int16_t)w) / 2;
     int16_t ty = (canvas->height() - (int16_t)h) / 2;
-    drawCornerBrackets(canvas, tx - 4, ty - 4, (int16_t)w + 8, (int16_t)h + 8, 8, 0x7BEF);
+    drawCornerBrackets(canvas, tx - 4, ty - 4, (int16_t)w + 8, (int16_t)h + 8, 8, pal.dim);
   }
 
   // ----- Lap line (below time) or controls hint -----
@@ -1239,13 +1248,13 @@ void DisplayManager::drawStopwatch() {
     String lapStr = "LAP " + String(laps) + ": " + formatSw(StopwatchManager::getLastLapMs());
     text7segBounds(lapStr.c_str(), 2, &w, &h);
     drawText7seg(canvas, lapStr.c_str(), (canvas->width() - w) / 2, 170, 2,
-            0xFFE0); // yellow
+            pal.warning); // yellow
   }
 
   // Controls hint (bottom, tiny gray)
   const char *hint = "TOP:START/STOP  BOT:LAP/RST";
   text7segBounds(hint, 1, &w, &h);
-  drawText7seg(canvas, hint, (canvas->width() - w) / 2, 222, 1, 0x7BEF); // gray
+  drawText7seg(canvas, hint, (canvas->width() - w) / 2, 222, 1, pal.dim); // gray
 
   pushToDisplay();
 }
@@ -1264,6 +1273,7 @@ static String formatPomo(uint32_t ms) {
 void DisplayManager::drawPomodoro() {
   if (!canvas)
     return;
+  const ColorPalette &pal = ColorScheme::currentPalette();
 
   // ponytail: blink the screen at 2Hz while alerting (phase just ended).
   // 500ms on / 500ms off — toggled by (millis() / 500) % 2.
@@ -1281,16 +1291,16 @@ void DisplayManager::drawPomodoro() {
   PomodoroPhase phase = PomodoroManager::currentPhase();
   if (PomodoroManager::isIdle()) {
     label = "READY";
-    labelColor = 0x7BEF; // gray
+    labelColor = pal.dim; // gray
   } else if (phase == PHASE_WORK) {
     label = "WORK";
-    labelColor = 0xF800; // red
+    labelColor = pal.error; // red
   } else if (phase == PHASE_SHORT_BREAK) {
     label = "SHORT";
-    labelColor = 0x07E0; // green
+    labelColor = pal.success; // green
   } else {
     label = "LONG";
-    labelColor = 0x07FF; // cyan
+    labelColor = pal.info; // cyan
   }
 
   // Append PAUSED if applicable
@@ -1309,12 +1319,12 @@ void DisplayManager::drawPomodoro() {
   String timeStr = formatPomo(PomodoroManager::getRemainingMs());
   text7segBounds(timeStr.c_str(), 8, &w, &h);
   drawText7seg(canvas, timeStr.c_str(), (canvas->width() - w) / 2,
-          (canvas->height() - h) / 2, 8, 0xFFFF); // white
+          (canvas->height() - h) / 2, 8, pal.text); // white
   // ponytail: watch-face-style corner brackets frame the main readout.
   {
     int16_t tx = (canvas->width() - (int16_t)w) / 2;
     int16_t ty = (canvas->height() - (int16_t)h) / 2;
-    drawCornerBrackets(canvas, tx - 4, ty - 4, (int16_t)w + 8, (int16_t)h + 8, 8, 0x7BEF);
+    drawCornerBrackets(canvas, tx - 4, ty - 4, (int16_t)w + 8, (int16_t)h + 8, 8, pal.dim);
   }
 
   // ----- Session count (below timer) -----
@@ -1322,12 +1332,12 @@ void DisplayManager::drawPomodoro() {
   String sessStr = "SESSION " + String(sessions) + "/4";
   text7segBounds(sessStr.c_str(), 2, &w, &h);
   drawText7seg(canvas, sessStr.c_str(), (canvas->width() - w) / 2, 170, 2,
-          0xFFE0); // yellow
+          pal.warning); // yellow
 
   // Controls hint (bottom, tiny gray)
   const char *hint = "TOP:START/PAUSE  BOT:SKIP";
   text7segBounds(hint, 1, &w, &h);
-  drawText7seg(canvas, hint, (canvas->width() - w) / 2, 222, 1, 0x7BEF); // gray
+  drawText7seg(canvas, hint, (canvas->width() - w) / 2, 222, 1, pal.dim); // gray
 
   pushToDisplay();
 }
@@ -1399,15 +1409,16 @@ static int computeMenuItems(uint8_t selectedIndex, int8_t scrollDir, float t,
 // Far items get a faked 3-offset blur; near/selected get the icon to the right.
 static void drawMenuLabel(GFXcanvas16 *c, int16_t ax, int16_t ay,
                           uint8_t labelIdx, float closeness) {
+  const ColorPalette &pal = ColorScheme::currentPalette();
   if (closeness < 0.0f) closeness = 0.0f;
   if (closeness > 1.0f) closeness = 1.0f;
   String label(MenuManager::menuItemLabel(labelIdx));
   bool isSelected = (closeness >= 0.6f);
   bool isFar      = (closeness < 0.25f);
   uint8_t  textSize = isSelected ? 6 : (isFar ? 2 : 4);
-  // ponytail: lightened dark endpoint (0x7BEF ~ light gray) so unselected items
+  // ponytail: lightened dark endpoint (pal.dim ~ light gray) so unselected items
   // stay readable instead of dropping to near-black at the arc edges.
-  uint16_t textCol  = lerp565(0x7BEF, 0xFFFF, closeness);
+  uint16_t textCol  = lerp565(pal.dim, pal.text, closeness);
   uint16_t w, h;
   text7segBounds(label.c_str(), textSize, &w, &h);
   int16_t halfH = (int16_t)h / 2;
@@ -1439,11 +1450,11 @@ static void drawMenuLabel(GFXcanvas16 *c, int16_t ax, int16_t ay,
       int16_t uy = ty + (int16_t)h + 2;
       int16_t uxEnd = bm ? (iconX + (int16_t)iw) : (tx + (int16_t)w);
       // 45° downward leader from the dot to the left end of the underline.
-      c->drawLine(ax, ay, tx, uy, 0x07FF);
-      c->drawFastHLine(tx, uy, uxEnd - tx, 0x07FF);
+      c->drawLine(ax, ay, tx, uy, pal.primary);
+      c->drawFastHLine(tx, uy, uxEnd - tx, pal.primary);
       // 45° downward-rightward angled extension off the underline's right end.
       const int16_t tailLen = 7;
-      c->drawLine(uxEnd, uy, uxEnd + tailLen, uy + tailLen, 0x07FF);
+      c->drawLine(uxEnd, uy, uxEnd + tailLen, uy + tailLen, pal.primary);
     }
   }
 }
@@ -1452,8 +1463,9 @@ static void drawMenuLabel(GFXcanvas16 *c, int16_t ax, int16_t ay,
 // Tick gauge around the arc + sweeping radar line with fading trail + reticle
 // brackets around the selected dot + "02/04" index readout top-right.
 static void drawMenuHUD(GFXcanvas16 *c, uint8_t selectedIndex, int8_t scrollDir, float t) {
+  const ColorPalette &pal = ColorScheme::currentPalette();
   const int16_t cx = MENU_CX, cy = MENU_CY, r = MENU_R;
-  const uint16_t arcColor = 0x07FF;
+  const uint16_t arcColor = pal.primary;
   // base arc
   c->drawCircle(cx, cy, r - 1, arcColor);
   c->drawCircle(cx, cy, r,     arcColor);
@@ -1463,7 +1475,7 @@ static void drawMenuHUD(GFXcanvas16 *c, uint8_t selectedIndex, int8_t scrollDir,
     float rad = a * M_PI / 180.0f;
     bool major = (a % 60 == 0);
     int16_t tickLen = major ? 12 : 5;
-    uint16_t col = major ? 0x07FF : 0x4208;
+    uint16_t col = major ? pal.primary : pal.muted;
     int16_t x0 = cx + (int16_t)((r + 4) * cosf(rad));
     int16_t y0 = cy + (int16_t)((r + 4) * sinf(rad));
     int16_t x1 = cx + (int16_t)((r + 4 + tickLen) * cosf(rad));
@@ -1478,7 +1490,7 @@ static void drawMenuHUD(GFXcanvas16 *c, uint8_t selectedIndex, int8_t scrollDir,
   for (int k = 0; k < 5; k++) {
     float a = (sweepDeg - k * 7.0f) * M_PI / 180.0f;
     float intensity = (k == 0) ? 1.0f : (0.5f - k * 0.1f);
-    uint16_t col = lerp565(0x0000, 0x07FF, intensity);
+    uint16_t col = lerp565(0x0000, pal.primary, intensity);
     int16_t ex = cx + (int16_t)((r + 18) * cosf(a));
     int16_t ey = cy + (int16_t)((r + 18) * sinf(a));
     c->drawLine(cx, cy, ex, ey, col);
@@ -1493,20 +1505,20 @@ static void drawMenuHUD(GFXcanvas16 *c, uint8_t selectedIndex, int8_t scrollDir,
     int16_t ay = cy + (int16_t)(r * sinf(a));
     float cl = items[i].closeness;
     bool sel = (cl >= 0.6f);
-    uint16_t dotColor = lerp565(0x2104, 0x07FF, cl);
+    uint16_t dotColor = lerp565(pal.muted, pal.primary, cl);
     uint8_t dotRad = 2 + (uint8_t)(cl * 4.0f + 0.5f);
     if (sel) {  // pulse
       float pulse = sinf(millis() / 200.0f) * 0.5f + 0.5f;
       dotRad += (uint8_t)(pulse * 2.0f);
     }
     c->fillCircle(ax, ay, dotRad, dotColor);
-    if (sel) drawCornerBrackets(c, ax - 11, ay - 11, 22, 22, 5, 0x07FF);
+    if (sel) drawCornerBrackets(c, ax - 11, ay - 11, 22, 22, 5, pal.primary);
     drawMenuLabel(c, ax, ay, items[i].idx, cl);
   }
   // index readout top-right
   char buf[8];
   snprintf(buf, sizeof(buf), "%02u/%02u", selectedIndex + 1, count);
-  drawText7seg(c, buf, c->width() - 70, 8, 2, 0x07FF);
+  drawText7seg(c, buf, c->width() - 70, 8, 2, pal.primary);
 }
 
 // Filled arc segment between two radii (no drawArc in Adafruit_GFX; faked with
@@ -1528,17 +1540,18 @@ static void drawArcSegment(GFXcanvas16 *c, int16_t cx, int16_t cy,
 // Double ring with lit segment at the selected slot + CRT scanlines +
 // pulsing dot.
 static void drawMenuHolo(GFXcanvas16 *c, uint8_t selectedIndex, int8_t scrollDir, float t) {
+  const ColorPalette &pal = ColorScheme::currentPalette();
   const int16_t cx = MENU_CX, cy = MENU_CY, r = MENU_R;
   const int16_t rIn = r - 8, rOut = r + 8;
   // dim band between rings
-  drawArcSegment(c, cx, cy, rIn, rOut, 0, 90, 0x2104);
+  drawArcSegment(c, cx, cy, rIn, rOut, 0, 90, pal.muted);
   // ring outlines
-  c->drawCircle(cx, cy, rIn,  0x4208);
-  c->drawCircle(cx, cy, rOut, 0x4208);
+  c->drawCircle(cx, cy, rIn,  pal.muted);
+  c->drawCircle(cx, cy, rOut, pal.muted);
   // CRT scanlines: every 3rd row a dim horizontal line over the menu area.
   // ponytail: cheap CRT texture — 80 drawFastHLine calls, no per-pixel work.
   for (int16_t y = 0; y < c->height(); y += 3)
-    c->drawFastHLine(0, y, c->width(), 0x2104);
+    c->drawFastHLine(0, y, c->width(), pal.muted);
   // items
   const uint8_t count = MenuManager::menuItemCount();
   MenuItemPos items[4];
@@ -1552,10 +1565,10 @@ static void drawMenuHolo(GFXcanvas16 *c, uint8_t selectedIndex, int8_t scrollDir
     // lit segment follows the selected item's angle
     if (sel) {
       float segCenter = items[i].angle;
-      drawArcSegment(c, cx, cy, rIn, rOut, segCenter, 22.0f, 0x07FF);
+      drawArcSegment(c, cx, cy, rIn, rOut, segCenter, 22.0f, pal.primary);
     }
     // dot with pulse on selected
-    uint16_t dotColor = lerp565(0x2104, 0x07FF, cl);
+    uint16_t dotColor = lerp565(pal.muted, pal.primary, cl);
     uint8_t dotRad = 2 + (uint8_t)(cl * 4.0f + 0.5f);
     if (sel) {
       float pulse = sinf(millis() / 200.0f) * 0.5f + 0.5f;
@@ -1571,8 +1584,9 @@ static void drawMenuHolo(GFXcanvas16 *c, uint8_t selectedIndex, int8_t scrollDir
 // horizontal lock-on bar from the selected label to the right edge with a
 // moving highlight segment. Telemetry values flicker via millis().
 static void drawMenuData(GFXcanvas16 *c, uint8_t selectedIndex, int8_t scrollDir, float t) {
+  const ColorPalette &pal = ColorScheme::currentPalette();
   const int16_t cx = MENU_CX, cy = MENU_CY, r = MENU_R;
-  c->drawCircle(cx, cy, r, 0x4208);  // dim base arc
+  c->drawCircle(cx, cy, r, pal.muted);  // dim base arc
   const uint8_t count = MenuManager::menuItemCount();
   MenuItemPos items[4];
   int n = computeMenuItems(selectedIndex, scrollDir, t, count, items);
@@ -1585,7 +1599,7 @@ static void drawMenuData(GFXcanvas16 *c, uint8_t selectedIndex, int8_t scrollDir
       int16_t y0 = cy + (int16_t)(r * sinf(a0));
       int16_t x1 = cx + (int16_t)(r * cosf(a1));
       int16_t y1 = cy + (int16_t)(r * sinf(a1));
-      c->drawLine(x0, y0, x1, y1, 0x4208);
+      c->drawLine(x0, y0, x1, y1, pal.muted);
     }
   }
   // ponytail: per-item pseudo-telemetry. Values derived from millis()+idx so they
@@ -1600,7 +1614,7 @@ static void drawMenuData(GFXcanvas16 *c, uint8_t selectedIndex, int8_t scrollDir
     bool sel = (cl >= 0.6f);
     bool isFar = (cl < 0.25f);
     // dot
-    uint16_t dotColor = lerp565(0x2104, 0x07FF, cl);
+    uint16_t dotColor = lerp565(pal.muted, pal.primary, cl);
     uint8_t dotRad = 2 + (uint8_t)(cl * 4.0f + 0.5f);
     if (sel) {
       float pulse = sinf(millis() / 200.0f) * 0.5f + 0.5f;
@@ -1613,19 +1627,19 @@ static void drawMenuData(GFXcanvas16 *c, uint8_t selectedIndex, int8_t scrollDir
       uint8_t idx = items[i].idx;
       // flicker: dim/bright toggle every ~400ms, offset per item
       bool flicker = ((millis() + idx * 137) / 400) % 2 == 0;
-      uint16_t tcol = flicker ? lerp565(0x4208, 0x07E0, cl) : 0x4208;
+      uint16_t tcol = flicker ? lerp565(pal.muted, pal.success, cl) : pal.muted;
       int16_t ty = ay + (sel ? 30 : 20);
       drawText7seg(c, TELE_L1[idx], ax, ty, 1, tcol);
-      drawText7seg(c, TELE_L2[idx], ax, ty + 14, 1, 0x4208);
+      drawText7seg(c, TELE_L2[idx], ax, ty + 14, 1, pal.muted);
     }
     // lock-on bar from selected label to right edge with moving highlight
     if (sel) {
       int16_t barY = ay;
-      c->drawFastHLine(ax, barY, c->width() - ax, 0x4208);
+      c->drawFastHLine(ax, barY, c->width() - ax, pal.muted);
       // moving 30px bright segment, ~1.5s traversal
       int16_t span = c->width() - ax;
       int16_t segPos = (int16_t)(fmodf(millis() / 1500.0f, 1.0f) * span);
-      c->drawFastHLine(ax + segPos, barY, 30, 0x07FF);
+      c->drawFastHLine(ax + segPos, barY, 30, pal.primary);
     }
   }
 }
@@ -1634,6 +1648,7 @@ static void drawMenuData(GFXcanvas16 *c, uint8_t selectedIndex, int8_t scrollDir
 // Marching-ants dashed arc + glow halo around selected dot + bracket-wrapped
 // selected label + subtle inner border. Subtle, lowest visual noise.
 static void drawMenuMinimal(GFXcanvas16 *c, uint8_t selectedIndex, int8_t scrollDir, float t) {
+  const ColorPalette &pal = ColorScheme::currentPalette();
   const int16_t cx = MENU_CX, cy = MENU_CY, r = MENU_R;
   // marching-ants dashed arc: 4px on / 4px off, phase rotates with millis().
   // ponytail: Adafruit_GFX has no dashed-circle, so we step around the half-arc
@@ -1648,10 +1663,10 @@ static void drawMenuMinimal(GFXcanvas16 *c, uint8_t selectedIndex, int8_t scroll
     int16_t y0 = cy + (int16_t)(r * sinf(rad0));
     int16_t x1 = cx + (int16_t)(r * cosf(rad1));
     int16_t y1 = cy + (int16_t)(r * sinf(rad1));
-    c->drawLine(x0, y0, x1, y1, 0x07FF);
+    c->drawLine(x0, y0, x1, y1, pal.primary);
   }
   // subtle inner border
-  c->drawRect(2, 2, c->width() - 4, c->height() - 4, 0x2104);
+  c->drawRect(2, 2, c->width() - 4, c->height() - 4, pal.muted);
   const uint8_t count = MenuManager::menuItemCount();
   MenuItemPos items[4];
   int n = computeMenuItems(selectedIndex, scrollDir, t, count, items);
@@ -1664,11 +1679,11 @@ static void drawMenuMinimal(GFXcanvas16 *c, uint8_t selectedIndex, int8_t scroll
     // glow halo: 3 concentric circles, dimmer outward (selected only)
     if (sel) {
       float pulse = sinf(millis() / 300.0f) * 0.5f + 0.5f;
-      c->fillCircle(ax, ay, 10 + (int16_t)(pulse * 2), 0x2104);
-      c->drawCircle(ax, ay, 9,  0x4208);
-      c->drawCircle(ax, ay, 12, 0x2104);
+      c->fillCircle(ax, ay, 10 + (int16_t)(pulse * 2), pal.muted);
+      c->drawCircle(ax, ay, 9,  pal.muted);
+      c->drawCircle(ax, ay, 12, pal.muted);
     }
-    uint16_t dotColor = lerp565(0x2104, 0x07FF, cl);
+    uint16_t dotColor = lerp565(pal.muted, pal.primary, cl);
     uint8_t dotRad = 2 + (uint8_t)(cl * 4.0f + 0.5f);
     c->fillCircle(ax, ay, dotRad, dotColor);
     // bracket-wrapped label for selected: "( WATCH )"
@@ -1680,8 +1695,8 @@ static void drawMenuMinimal(GFXcanvas16 *c, uint8_t selectedIndex, int8_t scroll
       int16_t halfH = (int16_t)h / 2;
       int16_t ty = ay - halfH;
       int16_t tx = ax + (int16_t)h - halfH + 2;
-      drawText7seg(c, "(", tx - 18, ty, 6, 0x07FF);
-      drawText7seg(c, ")", tx + (int16_t)w + 6, ty, 6, 0x07FF);
+      drawText7seg(c, "(", tx - 18, ty, 6, pal.primary);
+      drawText7seg(c, ")", tx + (int16_t)w + 6, ty, 6, pal.primary);
     }
     drawMenuLabel(c, ax, ay, items[i].idx, cl);
   }
@@ -1690,6 +1705,7 @@ static void drawMenuMinimal(GFXcanvas16 *c, uint8_t selectedIndex, int8_t scroll
 void DisplayManager::drawMenu(uint8_t selectedIndex, int8_t scrollDir, float t) {
   if (!canvas)
     return;
+  const ColorPalette &pal = ColorScheme::currentPalette();
   canvas->fillScreen(0x0000);
   switch (MenuManager::menuStyle()) {
     case STYLE_HUD:     drawMenuHUD(canvas, selectedIndex, scrollDir, t);     break;
@@ -1719,6 +1735,7 @@ void DisplayManager::drawMenu(uint8_t selectedIndex, int8_t scrollDir, float t) 
 // is fillScreen + memcpy (~5ms), keeping the slide smooth.
 void DisplayManager::drawTransition(uint8_t selectedIndex, float progress) {
   if (!canvas) return;
+  const ColorPalette &pal = ColorScheme::currentPalette();
   GFXcanvas16 *c = canvas;
   const int16_t fw = c->width(), fh = c->height();
 
@@ -1775,7 +1792,7 @@ void DisplayManager::drawTransition(uint8_t selectedIndex, float progress) {
       // Lock-off flash at the start (p<0.15): brackets flash white then fade.
       if (p < 0.15f) {
         float flashT = 1.0f - (p / 0.15f);
-        uint16_t flashCol = lerp565(0x0000, 0xFFFF, flashT);
+        uint16_t flashCol = lerp565(0x0000, pal.text, flashT);
         if (flashCol != 0x0000) {
           drawCornerBrackets(c, 0, 0, fw, fh, 10, flashCol);
           c->drawRect(1, 1, fw - 2, fh - 2, flashCol);
@@ -1797,7 +1814,7 @@ void DisplayManager::drawTransition(uint8_t selectedIndex, float progress) {
       int16_t cy = MENU_CY;
 
       if (visible && r > 1.0f) {
-        uint16_t arcCol = lerp565(0xFCA0, 0x07FF, p);  // amber → cyan (power-up)
+        uint16_t arcCol = lerp565(pal.warning, pal.primary, p);  // amber → cyan (power-up)
         c->drawCircle((int16_t)cx, cy, (int16_t)r,     arcCol);
         c->drawCircle((int16_t)cx, cy, (int16_t)r - 1, arcCol);
       }
@@ -1813,13 +1830,13 @@ void DisplayManager::drawTransition(uint8_t selectedIndex, float progress) {
         int16_t tx = (int16_t)labelX;
         int16_t ty = cy - (int16_t)lh / 2;
         int16_t ghostOff = (int16_t)textSize / 2 + 1;
-        drawText7seg(c, label, tx - ghostOff, ty, textSize, 0x07FF);
-        drawText7seg(c, label, tx + ghostOff, ty, textSize, 0xF800);
-        drawText7seg(c, label, tx,           ty, textSize, 0xFFFF);
+        drawText7seg(c, label, tx - ghostOff, ty, textSize, pal.primary);
+        drawText7seg(c, label, tx + ghostOff, ty, textSize, pal.error);
+        drawText7seg(c, label, tx,           ty, textSize, pal.text);
         // Underline grows 0→full width (inverse of retreat).
         int16_t underW = (int16_t)((float)lw * p);
         if (underW > 0)
-          c->drawFastHLine(tx, ty + (int16_t)lh + 2, underW, 0x07FF);
+          c->drawFastHLine(tx, ty + (int16_t)lh + 2, underW, pal.primary);
       }
 
       pushToDisplay();
@@ -1842,7 +1859,7 @@ void DisplayManager::drawTransition(uint8_t selectedIndex, float progress) {
     int16_t cy = MENU_CY;
 
     if (visible && r > 1.0f) {
-      uint16_t arcCol = lerp565(0x07FF, 0xFCA0, p);  // cyan → amber
+      uint16_t arcCol = lerp565(pal.primary, pal.warning, p);  // cyan → amber
       c->drawCircle((int16_t)cx, cy, (int16_t)r,     arcCol);
       c->drawCircle((int16_t)cx, cy, (int16_t)r - 1, arcCol);
     }
@@ -1860,14 +1877,14 @@ void DisplayManager::drawTransition(uint8_t selectedIndex, float progress) {
       int16_t tx = (int16_t)labelX;
       int16_t ty = cy - (int16_t)lh / 2;
       int16_t ghostOff = (int16_t)textSize / 2 + 1;
-      drawText7seg(c, label, tx - ghostOff, ty, textSize, 0x07FF);  // cyan ghost
-      drawText7seg(c, label, tx + ghostOff, ty, textSize, 0xF800);  // red ghost
-      drawText7seg(c, label, tx,           ty, textSize, 0xFFFF);  // white core
+      drawText7seg(c, label, tx - ghostOff, ty, textSize, pal.primary);  // cyan ghost
+      drawText7seg(c, label, tx + ghostOff, ty, textSize, pal.error);  // red ghost
+      drawText7seg(c, label, tx,           ty, textSize, pal.text);  // white core
       // ponytail: retreating underline — full width at p=0, shrinks to 0 as the
       // label collapses. Sits under the label and slides left with it.
       int16_t underW = (int16_t)((float)lw * (1.0f - p));
       if (underW > 0)
-        c->drawFastHLine(tx, ty + (int16_t)lh + 2, underW, 0x07FF);
+        c->drawFastHLine(tx, ty + (int16_t)lh + 2, underW, pal.primary);
     }
 
     pushToDisplay();
@@ -1915,7 +1932,7 @@ void DisplayManager::drawTransition(uint8_t selectedIndex, float progress) {
     // the screen settles into place. The snap-on is the "lock" beat.
     if (p > 0.85f) {
       float flashT = (p - 0.85f) / 0.15f;          // 0→1 over the last 15%
-      uint16_t flashCol = lerp565(0xFFFF, 0x0000, flashT);  // white → black
+      uint16_t flashCol = lerp565(pal.text, 0x0000, flashT);  // white → black
       if (flashCol != 0x0000) {
         drawCornerBrackets(c, 0, 0, fw, fh, 10, flashCol);
         c->drawRect(1, 1, fw - 2, fh - 2, flashCol);
@@ -1931,11 +1948,12 @@ void DisplayManager::drawTransition(uint8_t selectedIndex, float progress) {
 void DisplayManager::drawMenuStylePicker(uint8_t pickerIndex) {
   if (!canvas)
     return;
+  const ColorPalette &pal = ColorScheme::currentPalette();
   GFXcanvas16 *c = canvas;
   c->fillScreen(0x0000);
 
   // Title
-  drawText7seg(c, "MENU STYLE", 10, 10, 3, 0xBDF7);  // light blue-white
+  drawText7seg(c, "MENU STYLE", 10, 10, 3, pal.secondary);  // light blue-white
 
   const uint8_t count = MenuManager::menuStyleCount();
   const MenuStyle applied = MenuManager::menuStyle();
@@ -1947,8 +1965,8 @@ void DisplayManager::drawMenuStylePicker(uint8_t pickerIndex) {
     const char* label = MenuManager::menuStyleLabel(i);
     bool sel = (i == pickerIndex);
     bool isApplied = (i == (uint8_t)applied);
-    uint16_t col = sel ? 0x07FF : 0x7BEF;
-    uint16_t bulletCol = sel ? 0x07FF : 0x4208;
+    uint16_t col = sel ? pal.primary : pal.dim;
+    uint16_t bulletCol = sel ? pal.primary : pal.muted;
 
     // Bullet
     c->fillCircle(15, y + 12, 5, bulletCol);
@@ -1956,14 +1974,14 @@ void DisplayManager::drawMenuStylePicker(uint8_t pickerIndex) {
     drawText7seg(c, label, 35, y, 3, col);
     // "(current)" marker on the applied style — small filled dot (no * glyph)
     if (isApplied) {
-      c->fillCircle(c->width() - 14, y + 12, 4, 0xFFE0);
+      c->fillCircle(c->width() - 14, y + 12, 4, pal.warning);
     }
     // reticle around the selected row
-    if (sel) drawCornerBrackets(c, 6, y - 4, c->width() - 12, itemH - 4, 4, 0x07FF);
+    if (sel) drawCornerBrackets(c, 6, y - 4, c->width() - 12, itemH - 4, 4, pal.primary);
   }
 
   // Hint
-  drawText7seg(c, "DBL CLICK APPLY   BOTH BACK", 10, c->height() - 16, 1, 0x7BEF);
+  drawText7seg(c, "DBL CLICK APPLY   BOTH BACK", 10, c->height() - 16, 1, pal.dim);
 
   pushToDisplay();
 }
@@ -1971,11 +1989,12 @@ void DisplayManager::drawMenuStylePicker(uint8_t pickerIndex) {
 void DisplayManager::drawBrightnessPicker(uint8_t pickerIndex) {
   if (!canvas)
     return;
+  const ColorPalette &pal = ColorScheme::currentPalette();
   GFXcanvas16 *c = canvas;
   c->fillScreen(0x0000);
 
   // Title
-  drawText7seg(c, "BRIGHTNESS", 10, 10, 3, 0xBDF7);  // light blue-white
+  drawText7seg(c, "BRIGHTNESS", 10, 10, 3, pal.secondary);  // light blue-white
 
   // ponytail: 16-segment horizontal bar. Each filled segment = one level.
   // segW/gap chosen so the bar spans most of the 536px width.
@@ -1993,17 +2012,17 @@ void DisplayManager::drawBrightnessPicker(uint8_t pickerIndex) {
     // ponytail: level N fills N of 16 segments. Level 0 = empty (panel off),
     // level 15 = 15/16 filled (reads as "near max"). Consistent 1:1 mapping.
     bool filled = (i < pickerIndex);
-    uint16_t col = filled ? 0x07FF : 0x2104;       // cyan filled, dim empty
+    uint16_t col = filled ? pal.primary : pal.muted;       // cyan filled, dim empty
     c->fillRect(x, barY, segW, barH, col);
   }
 
   // Reticle around the whole bar
-  drawCornerBrackets(c, barX - 6, barY - 6, barW + 12, barH + 12, 5, 0x07FF);
+  drawCornerBrackets(c, barX - 6, barY - 6, barW + 12, barH + 12, 5, pal.primary);
 
   // "(current)" marker on the applied level's segment
   if (applied < segs) {
     int16_t mx = barX + applied * (segW + gap) + segW / 2;
-    c->fillCircle(mx, barY + barH + 12, 4, 0xFFE0);
+    c->fillCircle(mx, barY + barH + 12, 4, pal.warning);
   }
 
   // Numeric readout: level n/15 and DBV percentage
@@ -2011,15 +2030,126 @@ void DisplayManager::drawBrightnessPicker(uint8_t pickerIndex) {
   snprintf(buf, sizeof(buf), "LVL %u/%u", pickerIndex, segs - 1);
   uint16_t w, h;
   text7segBounds(buf, 2, &w, &h);
-  drawText7seg(c, buf, (c->width() - w) / 2, barY + barH + 30, 2, 0xFFFF);
+  drawText7seg(c, buf, (c->width() - w) / 2, barY + barH + 30, 2, pal.text);
 
   uint8_t pct = (uint8_t)((uint32_t)pickerIndex * 100 / (segs - 1));
   snprintf(buf, sizeof(buf), "%u%%", pct);
   text7segBounds(buf, 3, &w, &h);
-  drawText7seg(c, buf, (c->width() - w) / 2, 60, 3, 0x07FF);
+  drawText7seg(c, buf, (c->width() - w) / 2, 60, 3, pal.primary);
 
   // Hint
-  drawText7seg(c, "DBL CLICK APPLY   BOTH BACK", 10, c->height() - 16, 1, 0x7BEF);
+  drawText7seg(c, "DBL CLICK APPLY   BOTH BACK", 10, c->height() - 16, 1, pal.dim);
+
+  pushToDisplay();
+}
+
+// ponytail: color-scheme picker. Two levels: scheme list, then a hue wheel.
+// Uses the current picker state from MenuManager and generates a live preview.
+void DisplayManager::drawColorSchemePicker() {
+  if (!canvas)
+    return;
+  const ColorPalette &pal = ColorScheme::currentPalette();
+  GFXcanvas16 *c = canvas;
+  c->fillScreen(0x0000);
+
+  ColorSchemeType pickerType = MenuManager::colorSchemePickerType();
+  ColorHSV pickerHsv = MenuManager::colorSchemePickerHSV();
+  ColorPalette preview;
+  ColorScheme::generatePalette(pickerHsv, pickerType, preview);
+
+  if (!MenuManager::colorSchemePickingHue()) {
+    // --- Scheme type list ---
+    drawText7seg(c, "COLOR SCHEME", 10, 10, 3, pal.secondary);
+
+    const uint8_t count = ColorScheme::typeCount();
+    const int16_t startY = 48;
+    const int16_t itemH  = 28;
+    const int16_t swatchW = 50, swatchH = 8;
+    const ColorSchemeType applied = ColorScheme::currentType();
+
+    for (uint8_t i = 0; i < count; i++) {
+      int16_t y = startY + i * itemH;
+      bool sel = (i == (uint8_t)pickerType);
+      const char *label = ColorScheme::typeLabel((ColorSchemeType)i);
+      ColorPalette itemPal;
+      ColorScheme::generatePalette(pickerHsv, (ColorSchemeType)i, itemPal);
+
+      uint16_t col = sel ? pal.primary : pal.dim;
+      uint16_t bulletCol = sel ? pal.primary : pal.muted;
+
+      c->fillCircle(12, y + 10, 4, bulletCol);
+      drawText7seg(c, label, 28, y, 2, col);
+
+      // Small palette preview strip
+      int16_t sx = 170;
+      c->fillRect(sx,      y + 4, swatchW, swatchH, itemPal.primary);
+      c->fillRect(sx + swatchW, y + 4, swatchW, swatchH, itemPal.secondary);
+      c->fillRect(sx + swatchW * 2, y + 4, swatchW, swatchH, itemPal.success);
+      c->fillRect(sx + swatchW * 3, y + 4, swatchW, swatchH, itemPal.warning);
+      c->fillRect(sx + swatchW * 4, y + 4, swatchW, swatchH, itemPal.error);
+
+      if (sel) drawCornerBrackets(c, 6, y - 2, c->width() - 12, itemH, 3, pal.primary);
+
+      // "(current)" dot on the applied type
+      if (i == (uint8_t)applied) {
+        c->fillCircle(c->width() - 12, y + 10, 3, pal.warning);
+      }
+    }
+
+    drawText7seg(c, "TOP/BOT: SCHEME   LNG: HUE", 10, c->height() - 16, 1, pal.dim);
+  } else {
+    // --- Hue wheel ---
+    drawText7seg(c, "HUE", 10, 10, 3, pal.secondary);
+
+    // Show the active scheme type under the title.
+    const char *typeName = ColorScheme::typeLabel(pickerType);
+    uint16_t tw, th;
+    text7segBounds(typeName, 2, &tw, &th);
+    drawText7seg(c, typeName, (c->width() - tw) / 2, 45, 2, pal.primary);
+
+    // Draw a color wheel as a filled ring.
+    const int16_t cx = c->width() / 2;
+    const int16_t cy = c->height() / 2 - 10;
+    const float rIn = 60.0f, rOut = 90.0f;
+    const float step = 6.0f;
+    for (float a = 0.0f; a < 360.0f; a += step) {
+      uint16_t col = ColorScheme::hsvTo565((uint16_t)a, 255, 255);
+      float r0 = a * M_PI / 180.0f;
+      float r1 = (a + step) * M_PI / 180.0f;
+      int16_t x0 = cx + (int16_t)(rIn * cosf(r0));
+      int16_t y0 = cy + (int16_t)(rIn * sinf(r0));
+      int16_t x1 = cx + (int16_t)(rIn * cosf(r1));
+      int16_t y1 = cy + (int16_t)(rIn * sinf(r1));
+      int16_t x2 = cx + (int16_t)(rOut * cosf(r0));
+      int16_t y2 = cy + (int16_t)(rOut * sinf(r0));
+      int16_t x3 = cx + (int16_t)(rOut * cosf(r1));
+      int16_t y3 = cy + (int16_t)(rOut * sinf(r1));
+      c->fillTriangle(x0, y0, x2, y2, x1, y1, col);
+      c->fillTriangle(x1, y1, x2, y2, x3, y3, col);
+    }
+
+    // Cursor on the wheel at the selected hue.
+    float rad = (float)pickerHsv.h * M_PI / 180.0f;
+    int16_t cr = (int16_t)((rIn + rOut) / 2.0f);
+    int16_t curX = cx + (int16_t)(cr * cosf(rad));
+    int16_t curY = cy + (int16_t)(cr * sinf(rad));
+    c->fillCircle(curX, curY, 8, 0x0000);
+    c->drawCircle(curX, curY, 8, pal.text);
+    c->drawCircle(curX, curY, 6, pal.text);
+
+    // Palette swatches at the bottom.
+    const int16_t swW = 70, swatchH = 14, swGap = 6;
+    const int16_t swTotal = 5 * swW + 4 * swGap;
+    int16_t swX = (c->width() - swTotal) / 2;
+    int16_t swY = c->height() - 34;
+    uint16_t swatchCols[5] = { preview.primary, preview.secondary, preview.success,
+                               preview.warning, preview.error };
+    for (uint8_t i = 0; i < 5; i++) {
+      c->fillRect(swX + i * (swW + swGap), swY, swW, swatchH, swatchCols[i]);
+    }
+
+    drawText7seg(c, "TOP/BOT: HUE   LNG: APPLY", 10, c->height() - 16, 1, pal.dim);
+  }
 
   pushToDisplay();
 }

@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include "ButtonManager.h"
+#include "ColorScheme.h"
 
 enum AppMode {
   MODE_WATCH,
@@ -13,6 +14,7 @@ enum AppMode {
   MODE_CONFIG,
   MODE_MENU_STYLE,   // sub-screen of CONFIG: pick the rotary menu visual style
   MODE_BRIGHTNESS,   // sub-screen of CONFIG: adjust screen brightness
+  MODE_COLOR_SCHEME, // sub-screen of CONFIG: pick main color and color-theory scheme
   MODE_TRANSITION,   // ponytail: dive/zoom animation between menu and selected screen
 };
 
@@ -61,6 +63,11 @@ public:
   static void      setBrightness(uint8_t level);    // persist to NVS + apply to panel
   static uint8_t   brightnessPickerIndex();         // live picker cursor (not yet applied)
 
+  // Color scheme picker (sub-screen of CONFIG)
+  static ColorSchemeType colorSchemePickerType();   // live picker type (not yet applied)
+  static ColorHSV        colorSchemePickerHSV();    // live picker color (not yet applied)
+  static bool            colorSchemePickingHue();   // true = hue wheel, false = scheme list
+
   // Scroll animation
   static bool    isAnimating();
   static int8_t  scrollDir();       // -1 = scrolling up, +1 = scrolling down, 0 = idle
@@ -86,6 +93,9 @@ private:
   static MenuStyle _stylePickerIndex;   // live cursor in MODE_MENU_STYLE
   static uint8_t   _brightness;         // persisted level (0..15), loaded at init
   static uint8_t   _brightnessPicker;   // live cursor in MODE_BRIGHTNESS
+  static ColorSchemeType _colorSchemeTypePicker; // live cursor in MODE_COLOR_SCHEME
+  static ColorHSV        _colorHSVPicker;        // live color in MODE_COLOR_SCHEME
+  static bool            _colorSchemePickingHue; // list vs hue wheel
   static AppMode   _pendingMode;        // target screen during MODE_TRANSITION
   static bool      _transitionReverse;  // true = screen→menu, false = menu→screen
   static AppMode   _transitionFromMode; // screen being left in reverse transition

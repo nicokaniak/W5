@@ -10,6 +10,7 @@
 #include "PomodoroManager.h"
 #include "TimeManager.h"
 #include "WeatherManager.h"
+#include "ColorScheme.h"
 
 // ponytail: weather was fetched every loop tick (1/sec in the old loop).
 // The new loop runs at ~50Hz for button responsiveness, which would be 50x worse.
@@ -66,6 +67,9 @@ void setup() {
   Serial.println("Initializing display...");
   DisplayManager::initDisplay();
   Serial.println("Display initialized");
+
+  ColorScheme::init();
+  Serial.println("Color scheme initialized");
 
   // WiFi first so NTP can sync
   WeatherManager::initWeather();
@@ -153,6 +157,15 @@ void loop() {
       bool force = MenuManager::consumeDirty();
       if (force || now - lastMenuRedraw >= MENU_REDRAW_MS) {
         DisplayManager::drawBrightnessPicker(MenuManager::brightnessPickerIndex());
+        lastMenuRedraw = now;
+      }
+      break;
+    }
+    case MODE_COLOR_SCHEME: {
+      // Color scheme picker: redraw on change.
+      bool force = MenuManager::consumeDirty();
+      if (force || now - lastMenuRedraw >= MENU_REDRAW_MS) {
+        DisplayManager::drawColorSchemePicker();
         lastMenuRedraw = now;
       }
       break;

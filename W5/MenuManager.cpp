@@ -2,6 +2,7 @@
 #include "StopwatchManager.h"
 #include "PomodoroManager.h"
 #include "DisplayManager.h"
+#include "ColorScheme.h"
 #include "TimeManager.h"
 #include "WeatherManager.h"
 #include <WiFi.h>
@@ -20,9 +21,9 @@ static const uint8_t NUM_ITEMS = 5;
 
 // ponytail: config sub-menu. Adding items only requires extending this array;
 // the handler dispatches by index below. Index 0 = Wi-Fi portal, 1 = style picker,
-// 2 = brightness picker.
-static const char* CONFIG_ITEMS[] = { "Setup Wi-Fi", "Menu Style", "Brightness" };
-static const uint8_t NUM_CONFIG_ITEMS = 3;
+// 2 = brightness picker, 3 = color scheme picker.
+static const char* CONFIG_ITEMS[] = { "Setup Wi-Fi", "Menu Style", "Brightness", "Color Scheme" };
+static const uint8_t NUM_CONFIG_ITEMS = 4;
 
 // ponytail: rotary menu visual styles. Keep in sync with MenuStyle enum (header).
 static const char* MENU_STYLE_LABELS[] = { "HUD", "HOLO", "DATA", "MINIMAL" };
@@ -57,6 +58,9 @@ MenuStyle MenuManager::_menuStyle       = STYLE_HUD;
 MenuStyle MenuManager::_stylePickerIndex = STYLE_HUD;
 uint8_t   MenuManager::_brightness       = BRIGHTNESS_LEVELS - 1; // default max
 uint8_t   MenuManager::_brightnessPicker = BRIGHTNESS_LEVELS - 1;
+ColorSchemeType MenuManager::_colorSchemeTypePicker = SCHEME_COMPLEMENTARY;
+ColorHSV        MenuManager::_colorHSVPicker        = {180, 255, 255};
+bool            MenuManager::_colorSchemePickingHue = false;
 AppMode   MenuManager::_pendingMode      = MODE_WATCH;
 bool      MenuManager::_transitionReverse = false;
 AppMode   MenuManager::_transitionFromMode = MODE_WATCH;
@@ -81,6 +85,10 @@ void MenuManager::init() {
   _brightness = b;
   _brightnessPicker = b;
   lcd_brightness(brightnessValue(b));  // apply persisted brightness to the panel
+  // Color scheme is loaded by ColorScheme::init() in setup(); mirror to picker.
+  _colorSchemeTypePicker = ColorScheme::currentType();
+  _colorHSVPicker = ColorScheme::currentHSV();
+  _colorSchemePickingHue = false;
   _pendingMode = MODE_WATCH;
 }
 
@@ -132,6 +140,10 @@ void MenuManager::setMenuStyle(MenuStyle s) {
 
 uint8_t MenuManager::brightness()          { return _brightness; }
 uint8_t MenuManager::brightnessPickerIndex() { return _brightnessPicker; }
+
+ColorSchemeType MenuManager::colorSchemePickerType() { return _colorSchemeTypePicker; }
+ColorHSV        MenuManager::colorSchemePickerHSV()  { return _colorHSVPicker; }
+bool            MenuManager::colorSchemePickingHue() { return _colorSchemePickingHue; }
 
 void MenuManager::setBrightness(uint8_t level) {
   if (level >= BRIGHTNESS_LEVELS) level = BRIGHTNESS_LEVELS - 1;
@@ -190,6 +202,7 @@ static uint8_t modeToMenuIndex(AppMode m) {
     case MODE_POMODORO:  return 2;
     case MODE_WEATHER:   return 3;
     case MODE_CONFIG:    return NUM_ITEMS - 1; // 4
+    case MODE_COLOR_SCHEME: return NUM_ITEMS - 1; // opened from Config item
     case MODE_TRANSITION: return modeToMenuIndex(MenuManager::pendingMode());
     default:            return 0;
   }
@@ -215,6 +228,17 @@ void MenuManager::handleEvent(ButtonEvent evt) {
       lcd_brightness(brightnessValue(_brightness));
       _mode = MODE_CONFIG;
       _configIndex = 2; // land back on "Brightness"
+    } else if (_mode == MODE_COLOR_SCHEME) {
+      if (_colorSchemePickingHue) {
+        // Back from hue wheel to scheme list.
+        _colorSchemePickingHue = false;
+      } else {
+        // Back from scheme list to config sub-menu.
+        _colorSchemeTypePicker = ColorScheme::currentType();
+        _colorHSVPicker = ColorScheme::currentHSV();
+        _mode = MODE_CONFIG;
+        _configIndex = 3; // land back on "Color Scheme"
+      }
     } else if (_mode == MODE_CONFIG) {
       // Exit config sub-menu back to the main Config item via reverse transition.
       _transitionFromMode = MODE_CONFIG;
@@ -257,6 +281,13 @@ void MenuManager::handleEvent(ButtonEvent evt) {
     } else if (_mode == MODE_BRIGHTNESS) {
       _brightnessPicker = _brightness;  // discard unapplied cursor
       lcd_brightness(brightnessValue(_brightness));  // restore panel
+      _mode = MODE_MENU;
+      _selectedIndex = NUM_ITEMS - 1;
+    } else if (_mode == MODE_COLOR_SCHEME) {
+      // Discard any unapplied color changes and return to the main menu.
+      _colorSchemeTypePicker = ColorScheme::currentType();
+      _colorHSVPicker = ColorScheme::currentHSV();
+      _colorSchemePickingHue = false;
       _mode = MODE_MENU;
       _selectedIndex = NUM_ITEMS - 1;
     } else if (_mode == MODE_TRANSITION) {
@@ -351,6 +382,49 @@ void MenuManager::handleEvent(ButtonEvent evt) {
     return;
   }
 
+  // Color scheme picker sub-screen.
+  // Two levels: scheme list, then hue wheel. TOP_LONG enters/applies.
+  if (_mode == MODE_COLOR_SCHEME) {
+    switch (evt) {
+      case EVENT_TOP_CLICK:
+        if (_colorSchemePickingHue) {
+          _colorHSVPicker.h = (_colorHSVPicker.h + 360 - 5) % 360;
+        } else {
+          uint8_t t = (uint8_t)_colorSchemeTypePicker;
+          t = (t + SCHEME_TYPE_COUNT - 1) % SCHEME_TYPE_COUNT;
+          _colorSchemeTypePicker = (ColorSchemeType)t;
+        }
+        _dirty = true;
+        break;
+      case EVENT_BOTTOM_CLICK:
+        if (_colorSchemePickingHue) {
+          _colorHSVPicker.h = (_colorHSVPicker.h + 5) % 360;
+        } else {
+          uint8_t t = (uint8_t)_colorSchemeTypePicker;
+          t = (t + 1) % SCHEME_TYPE_COUNT;
+          _colorSchemeTypePicker = (ColorSchemeType)t;
+        }
+        _dirty = true;
+        break;
+      case EVENT_TOP_LONG_PRESS:
+        if (_colorSchemePickingHue) {
+          // Apply selected main color + scheme and exit to main menu.
+          ColorScheme::setType(_colorSchemeTypePicker);
+          ColorScheme::setHSV(_colorHSVPicker);
+          ColorScheme::save();
+          _mode = MODE_MENU;
+          _selectedIndex = NUM_ITEMS - 1; // land on Config item
+        } else {
+          // Enter hue wheel for the selected scheme.
+          _colorSchemePickingHue = true;
+        }
+        _dirty = true;
+        break;
+      default: break;
+    }
+    return;
+  }
+
   // Config sub-menu handling.
   if (_mode == MODE_CONFIG) {
     switch (evt) {
@@ -379,6 +453,14 @@ void MenuManager::handleEvent(ButtonEvent evt) {
           _mode = MODE_BRIGHTNESS;
           _dirty = true;
           Serial.println("CONFIG: open brightness picker");
+        } else if (_configIndex == 3) {
+          // Open the color scheme picker; cursor starts at the current scheme/color.
+          _colorSchemeTypePicker = ColorScheme::currentType();
+          _colorHSVPicker = ColorScheme::currentHSV();
+          _colorSchemePickingHue = false;
+          _mode = MODE_COLOR_SCHEME;
+          _dirty = true;
+          Serial.println("CONFIG: open color scheme picker");
         }
         break;
       default: break;

@@ -16,6 +16,7 @@ public:
   static void drawConfigMenu(uint8_t selectedIndex);
   static void drawMenuStylePicker(uint8_t pickerIndex);
   static void drawBrightnessPicker(uint8_t pickerIndex);
+  static void drawColorSchemePicker();
   static void drawWifiPortalScreen();
   static void drawWifiResultScreen(bool connected, const String &message);
   // ponytail: sci-fi blink-shrink-slide transition (forward + reverse).
