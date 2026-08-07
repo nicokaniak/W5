@@ -378,8 +378,18 @@ void DisplayManager::initDisplay() {
 
 void DisplayManager::pushToDisplay() {
   if (canvas && !transitionSuppressPush) {
+    uint32_t t0 = micros();
     lcd_PushColors(0, 0, canvas->width(), canvas->height(),
                    canvas->getBuffer());
+    uint32_t dt = micros() - t0;
+    // ponytail: temporary push timing so we can see if SPI transfer is the
+    // bottleneck. Remove once the real cause is confirmed.
+    static uint32_t acc = 0, cnt = 0, lastPrint = 0;
+    acc += dt; cnt++;
+    if (millis() - lastPrint >= 1000) {
+      Serial.printf("PUSH t=%u us n=%u\n", acc / cnt, cnt);
+      acc = cnt = 0; lastPrint = millis();
+    }
   }
 }
 

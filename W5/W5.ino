@@ -39,6 +39,12 @@ static uint32_t lastStopwatchRedraw = 0;
 static uint32_t lastPomodoroRedraw = 0;
 static uint32_t lastMenuRedraw = 0;
 
+// ponytail: temporary loop/draw timing; remove once the input-lag bottleneck
+// is identified.
+static uint32_t prof_loopAcc = 0, prof_loopCnt = 0;
+static uint32_t prof_drawAcc = 0, prof_drawCnt = 0;
+static uint32_t prof_lastPrint = 0;
+
 void setup() {
   // ===== CRITICAL: ENABLE POWER FIRST - BEFORE ANYTHING ELSE =====
   // GPIO15 enables the power circuit for display and battery
@@ -93,6 +99,16 @@ void setup() {
 }
 
 void loop() {
+  uint32_t loopStart = micros();
+  // ponytail: temporary macro to time each DisplayManager draw call. See end
+  // of loop() for the Serial print.
+#define DRAW(t) do { \
+    uint32_t _ds = micros(); \
+    (t); \
+    uint32_t _de = micros(); \
+    if (_de > _ds) { prof_drawAcc += _de - _ds; prof_drawCnt++; } \
+  } while (0)
+
   // Poll buttons every iteration (~50Hz) so clicks/long-press feel responsive
   ButtonManager::update();
   ButtonEvent evt = ButtonManager::pollEvent();
@@ -106,7 +122,7 @@ void loop() {
       bool force = MenuManager::consumeDirty();
       if (force || now - lastWatchRedraw >= WATCH_REDRAW_MS) {
         TimeManager::updateTime();
-        DisplayManager::drawWatchFace(TimeManager::getCurrentTime());
+        DRAW(DisplayManager::drawWatchFace(TimeManager::getCurrentTime()));
         lastWatchRedraw = now;
       }
       if (now - lastWeatherFetch >= WEATHER_FETCH_MS) {
@@ -119,18 +135,18 @@ void loop() {
       if (MenuManager::isAnimating()) {
         // Drive the slide animation: redraw every frame with interpolated positions
         MenuManager::updateAnimation();
-        DisplayManager::drawMenu(MenuManager::selectedIndex(),
+        DRAW(DisplayManager::drawMenu(MenuManager::selectedIndex(),
                                  MenuManager::scrollDir(),
-                                 MenuManager::animProgress());
+                                 MenuManager::animProgress()));
         lastMenuRedraw = now;
       } else if (MenuManager::consumeDirty()) {
         // Static redraw (mode entry, animation just finished, etc.)
-        DisplayManager::drawMenu(MenuManager::selectedIndex());
+        DRAW(DisplayManager::drawMenu(MenuManager::selectedIndex()));
         lastMenuRedraw = now;
       } else if (now - lastMenuRedraw >= MENU_REDRAW_MS) {
         // Ambient: styles use millis()-driven effects (sweep/pulse/scanlines)
         // that need continuous redraw even when the carousel is idle.
-        DisplayManager::drawMenu(MenuManager::selectedIndex());
+        DRAW(DisplayManager::drawMenu(MenuManager::selectedIndex()));
         lastMenuRedraw = now;
       }
       break;
@@ -138,8 +154,8 @@ void loop() {
       // Dive/zoom: redraw every frame until the animation finishes, then
       // updateAnimation() resolves _mode into the target screen.
       MenuManager::updateAnimation();
-      DisplayManager::drawTransition(MenuManager::selectedIndex(),
-                                     MenuManager::animProgress());
+      DRAW(DisplayManager::drawTransition(MenuManager::selectedIndex(),
+                                     MenuManager::animProgress()));
       lastMenuRedraw = now;
       break;
     }
@@ -147,7 +163,7 @@ void loop() {
       // Style picker: redraw on change or at 20fps for the reticle/ambient feel.
       bool force = MenuManager::consumeDirty();
       if (force || now - lastMenuRedraw >= MENU_REDRAW_MS) {
-        DisplayManager::drawMenuStylePicker((uint8_t)MenuManager::menuStylePickerIndex());
+        DRAW(DisplayManager::drawMenuStylePicker((uint8_t)MenuManager::menuStylePickerIndex()));
         lastMenuRedraw = now;
       }
       break;
@@ -157,7 +173,7 @@ void loop() {
       // when dirty (the live preview is driven by lcd_brightness(), not the UI).
       bool force = MenuManager::consumeDirty();
       if (force || now - lastMenuRedraw >= MENU_REDRAW_MS) {
-        DisplayManager::drawBrightnessPicker(MenuManager::brightnessPickerIndex());
+        DRAW(DisplayManager::drawBrightnessPicker(MenuManager::brightnessPickerIndex()));
         lastMenuRedraw = now;
       }
       break;
@@ -166,7 +182,7 @@ void loop() {
       // Color scheme picker: redraw on change.
       bool force = MenuManager::consumeDirty();
       if (force || now - lastMenuRedraw >= MENU_REDRAW_MS) {
-        DisplayManager::drawColorSchemePicker();
+        DRAW(DisplayManager::drawColorSchemePicker());
         lastMenuRedraw = now;
       }
       break;
@@ -177,7 +193,7 @@ void loop() {
       bool force = MenuManager::consumeDirty() || StopwatchManager::consumeDirty();
       if (force || (StopwatchManager::isRunning() &&
                     now - lastStopwatchRedraw >= STOPWATCH_REDRAW_MS)) {
-        DisplayManager::drawStopwatch();
+        DRAW(DisplayManager::drawStopwatch());
         lastStopwatchRedraw = now;
       }
       break;
@@ -194,7 +210,7 @@ void loop() {
                         ? (now - lastPomodoroRedraw >= 250)
                         : false;
       if (force || periodic) {
-        DisplayManager::drawPomodoro();
+        DRAW(DisplayManager::drawPomodoro());
         lastPomodoroRedraw = now;
       }
       break;
@@ -208,15 +224,30 @@ void loop() {
         force = true;
       }
       if (force) {
-        DisplayManager::drawWeatherScreen();
+        DRAW(DisplayManager::drawWeatherScreen());
       }
       break;
     }
     case MODE_CONFIG:
       if (MenuManager::consumeDirty()) {
-        DisplayManager::drawConfigMenu(MenuManager::configSelectedIndex());
+        DRAW(DisplayManager::drawConfigMenu(MenuManager::configSelectedIndex()));
       }
       break;
+  }
+
+  uint32_t loopEnd = micros();
+  prof_loopAcc += (loopEnd - loopStart);
+  prof_loopCnt++;
+  // ponytail: temporary once-per-second profile print. Remove once the lag
+  // bottleneck is confirmed.
+  if (millis() - prof_lastPrint >= 1000 && prof_loopCnt) {
+    Serial.printf("LOOP mode=%d loop=%u us draw=%u us n=%u\n",
+                  (int)MenuManager::currentMode(),
+                  prof_loopAcc / prof_loopCnt,
+                  prof_drawCnt ? prof_drawAcc / prof_drawCnt : 0,
+                  prof_loopCnt);
+    prof_loopAcc = prof_loopCnt = prof_drawAcc = prof_drawCnt = 0;
+    prof_lastPrint = millis();
   }
 
   // ponytail: 10ms keeps button polling at ~100Hz (debounce window is 20ms, so
@@ -224,4 +255,6 @@ void loop() {
   // — the ESP32 isn't sleep-bound here). Redraw paths are independently throttled
   // to 20-50Hz via the *_REDRAW_MS constants, so this only affects input latency.
   delay(10);
+
+#undef DRAW
 }
