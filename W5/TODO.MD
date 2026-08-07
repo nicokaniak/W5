@@ -9,6 +9,6 @@
 - [NOP] add calendar from google?
 - [ ] vertical indicator, for what?
 - [ ] a bit of spacying for tags in menu roller
-- [ ] menu, ad downwardd 45 deg line to connect dot to horizontal line, privdes spacying for tag text
+- [x] menu, ad downwardd 45 deg line to connect dot to horizontal line, privdes spacying for tag text
 - [ ] pre selection tags in menue a bit brighter or whiter
 - [ ] option colorschemes and select main color

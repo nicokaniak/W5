@@ -1410,10 +1410,13 @@ static void drawMenuLabel(GFXcanvas16 *c, int16_t ax, int16_t ay,
   uint16_t textCol  = lerp565(0x7BEF, 0xFFFF, closeness);
   uint16_t w, h;
   text7segBounds(label.c_str(), textSize, &w, &h);
-  // ponytail: nudge the label right of the arc point so the text isn't kissing
-  // the circumference.
-  int16_t tx = ax + 6;
-  int16_t ty = ay - (int16_t)h / 2;
+  int16_t halfH = (int16_t)h / 2;
+  int16_t ty = ay - halfH;
+  // ponytail: selected item gets a 45° downward leader from the dot to the
+  // underline, which pushes the tag text out from the arc. Leader length equals
+  // the vertical drop from dot to underline so the angle is exactly 45°.
+  int16_t tagOffset = isSelected ? ((int16_t)h - halfH + 2) : 6;
+  int16_t tx = ax + tagOffset;
   if (isFar) {
     uint16_t blurCol = lerp565(0x2104, 0x4208, closeness * 4.0f);
     drawText7seg(c, label.c_str(), tx,     ty,     textSize, blurCol);
@@ -1435,6 +1438,8 @@ static void drawMenuLabel(GFXcanvas16 *c, int16_t ax, int16_t ay,
     if (isSelected) {
       int16_t uy = ty + (int16_t)h + 2;
       int16_t uxEnd = bm ? (iconX + (int16_t)iw) : (tx + (int16_t)w);
+      // 45° downward leader from the dot to the left end of the underline.
+      c->drawLine(ax, ay, tx, uy, 0x07FF);
       c->drawFastHLine(tx, uy, uxEnd - tx, 0x07FF);
       // 45° downward-rightward angled extension off the underline's right end.
       const int16_t tailLen = 7;
@@ -1672,9 +1677,11 @@ static void drawMenuMinimal(GFXcanvas16 *c, uint8_t selectedIndex, int8_t scroll
       String label(MenuManager::menuItemLabel(items[i].idx));
       uint16_t w, h;
       text7segBounds(label.c_str(), 6, &w, &h);
-      int16_t ty = ay - (int16_t)h / 2;
-      drawText7seg(c, "(", ax - 18, ty, 6, 0x07FF);
-      drawText7seg(c, ")", ax + (int16_t)w + 6, ty, 6, 0x07FF);
+      int16_t halfH = (int16_t)h / 2;
+      int16_t ty = ay - halfH;
+      int16_t tx = ax + (int16_t)h - halfH + 2;
+      drawText7seg(c, "(", tx - 18, ty, 6, 0x07FF);
+      drawText7seg(c, ")", tx + (int16_t)w + 6, ty, 6, 0x07FF);
     }
     drawMenuLabel(c, ax, ay, items[i].idx, cl);
   }
